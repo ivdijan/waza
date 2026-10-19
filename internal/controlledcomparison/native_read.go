@@ -113,7 +113,7 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 	if !bytes.Equal(core, native.Policy) {
 		return decision, fmt.Errorf("native envelope and core policy bytes differ")
 	}
-	captured, err := nativeArtifact(ctx, root, "native-capture.json", 512<<20)
+	captured, err := nativeArtifact(ctx, root, "native-capture.json", nativesnapshot.CollectionWireBytes)
 	if err != nil {
 		return decision, err
 	}
@@ -424,7 +424,7 @@ func nativeArtifactWithOpener(ctx context.Context, root *os.Root, name string, m
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if root == nil || name == "." || filepath.Base(name) != name || maximum < 1 || maximum > 512<<20 {
+	if root == nil || name == "." || filepath.Base(name) != name || maximum < 1 || maximum > nativesnapshot.CollectionWireBytes {
 		return nil, fmt.Errorf("invalid bounded native artifact read")
 	}
 	before, err := root.Lstat(name)
@@ -433,6 +433,9 @@ func nativeArtifactWithOpener(ctx context.Context, root *os.Root, name string, m
 	}
 	if !before.Mode().IsRegular() {
 		return nil, fmt.Errorf("native artifact %s is not a regular file", name)
+	}
+	if before.Size() > int64(maximum) {
+		return nil, fmt.Errorf("native artifact %s exceeds byte limit", name)
 	}
 	file, err := open(root, name)
 	if err != nil {

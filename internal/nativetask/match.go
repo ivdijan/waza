@@ -20,9 +20,10 @@ import (
 // Bytes is a string solely to avoid shared mutable byte storage; it is not text.
 // Values supplied directly to MatchSnapshot are not resolver authenticity.
 type CapturedSource struct {
-	Path   string
-	Bytes  string
-	Digest models.EvidenceDigest
+	Executable bool
+	Path       string
+	Bytes      string
+	Digest     models.EvidenceDigest
 }
 
 // MatchSnapshot only compares retained inputs. It performs no source reads,
@@ -99,7 +100,14 @@ func matchSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasep
 			strings.Contains(source.Path, "\\") || filepath.ToSlash(filepath.Clean(source.Path)) != source.Path {
 			return fmt.Errorf("native snapshot sources require canonical unique ordered paths")
 		}
-		if len(source.Bytes) > limit || total > limit-len(source.Bytes) {
+		sourceLimit := limit
+		if collection {
+			sourceLimit = 16 << 20
+			if source.Executable {
+				sourceLimit = CollectionExecutableBytes
+			}
+		}
+		if len(source.Bytes) > sourceLimit || total > limit-len(source.Bytes) {
 			return fmt.Errorf("native snapshot bridge exceeds primitive bounded inventory")
 		}
 		prepared := data.Sources[i]

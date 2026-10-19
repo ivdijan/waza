@@ -500,5 +500,8 @@ func reconstructArm(ctx context.Context, snapshot armSnapshot, associated armAss
 	if err := ctx.Err(); err != nil {
 		return controlledprojection.SourceProjection{}, err
 	}
+	if executableLimit, _ := sourceByteLimits(ctx); executableLimit == CollectionExecutableBytes {
+		return controlledprojection.NativeCollectionPlan(suite)
+	}
 	return controlledprojection.NativePlan(suite)
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/microsoft/waza/internal/assurance"
 	"github.com/microsoft/waza/internal/execution"
 	"github.com/microsoft/waza/internal/models"
 	"github.com/microsoft/waza/internal/releasepolicy"
@@ -48,8 +47,9 @@ func collectionFixture(t *testing.T) (*Prepared, *Admitted, *execution.Execution
 
 func TestCollectionPreparationReferencesLargeExecutableWithoutExpandingAttempts(t *testing.T) {
 	_, admitted, req, sources, _ := collectionFixture(t)
-	source := strings.Repeat("x", assurance.MaxLabelBytes+1)
+	source := strings.Repeat("x", 16<<20+1)
 	sources[0].Bytes, sources[0].Digest = source, releasepolicy.SourceDigest([]byte(source))
+	sources[0].Executable = true
 	prepared, err := PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, sources)
 	require.NoError(t, err, "the separately selected profile retains an evaluator larger than the private primitive cap")
 	require.Less(t, len(prepared.data), 2048, "per-attempt preparation must not encode executable bytes")
@@ -88,16 +88,27 @@ func TestCollectionPreparationRawInventoryBoundary(t *testing.T) {
 	unit := strings.Repeat("x", 1<<20)
 	digest := releasepolicy.SourceDigest([]byte(unit))
 	sources := []CapturedSource{}
-	for i := 0; i < 256; i++ {
+	for i := 0; i < 512; i++ {
 		sources = append(sources, CapturedSource{Path: fmt.Sprintf("source-%03d", i), Bytes: unit, Digest: digest})
 	}
 	_, err := PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, sources)
-	require.NoError(t, err, "exact 256 MiB aggregate boundary")
-	sources = append(sources, CapturedSource{Path: "source-256", Bytes: "x", Digest: releasepolicy.SourceDigest([]byte("x"))})
+	require.NoError(t, err, "exact 512 MiB aggregate boundary")
+	sources = append(sources, CapturedSource{Path: "source-512", Bytes: "x", Digest: releasepolicy.SourceDigest([]byte("x"))})
 	_, err = PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, sources)
 	require.ErrorContains(t, err, "bounded inventory")
 	_, err = PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, make([]CapturedSource, collectionSourceEntries+1))
 	require.Error(t, err)
+}
+
+func TestCollectionPreparationOrdinarySourceLimit(t *testing.T) {
+	_, _, req, sources, _ := collectionFixture(t)
+	content := strings.Repeat("x", 16<<20+1)
+	sources[0].Bytes, sources[0].Digest = content, releasepolicy.SourceDigest([]byte(content))
+	_, err := PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, sources)
+	require.ErrorContains(t, err, "invalid retained native source")
+	sources[0].Executable = true
+	_, err = PrepareCaptured(t.Context(), releasepolicy.Baseline, "task", req, sources)
+	require.NoError(t, err, "only evaluator-role sources select the executable allowance")
 }
 
 func TestCollectionAmbiguousAssistantContentDoesNotBecomeObservedEmptyText(t *testing.T) {

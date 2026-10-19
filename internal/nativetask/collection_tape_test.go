@@ -100,4 +100,34 @@ func TestCollectionTapeChecksEventCapacityBeforeAnyCompletionWrite(t *testing.T)
 			})
 		}
 	}
+
+}
+
+func TestCollectionTapeAdmissionBudgetBeforeStart(t *testing.T) {
+	for _, delta := range []int{0, 1} {
+		t.Run(string(rune('0'+delta)), func(t *testing.T) {
+			_, admitted, _, _, _ := collectionFixture(t)
+			remaining, err := prefixAdmissionRemaining(admitted, collectionEncodedBytes, true)
+			require.NoError(t, err)
+			parent, err := os.OpenRoot(t.TempDir())
+			require.NoError(t, err)
+			defer func() { require.NoError(t, parent.Close()) }()
+			tape, err := CreateCollectionTape(t.Context(), parent, "native")
+			require.NoError(t, err)
+			defer func() { require.NoError(t, tape.Close()) }()
+			tape.admissionRemaining = collectionEncodedBytes - remaining - delta
+			err = tape.Start(t.Context(), admitted)
+			raw, readErr := tape.root.ReadFile(eventFile)
+			require.NoError(t, readErr)
+			if delta == 0 {
+				require.NoError(t, err)
+				require.Zero(t, tape.admissionRemaining)
+				require.NotEmpty(t, raw)
+			} else {
+				require.ErrorContains(t, err, "admission")
+				require.Empty(t, raw)
+				require.True(t, tape.poisoned)
+			}
+		})
+	}
 }

@@ -145,12 +145,16 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 			return nil, fmt.Errorf("unsupported physical source path alias %q", rel)
 		}
 	}
+	executableLimit, totalLimit := sourceByteLimits(f.ctx)
 	limit := maxSourceBytes
 	if f.role == "executable" {
-		limit = maxExecutableBytes
+		limit = executableLimit
 	}
 	if before.Size() > int64(limit) {
 		return nil, fmt.Errorf("input %q exceeds source limit", rel)
+	}
+	if before.Size() > int64(totalLimit-*f.total) {
+		return nil, fmt.Errorf("captured source byte limit exceeded")
 	}
 	if err := f.ctx.Err(); err != nil {
 		return nil, err
@@ -175,7 +179,7 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 		}
 		n, readErr := file.Read(buf)
 		output.Write(buf[:n])
-		if output.Len() > limit || *f.total+output.Len() > maxTotalBytes {
+		if output.Len() > limit || *f.total+output.Len() > totalLimit {
 			return nil, fmt.Errorf("captured source byte limit exceeded")
 		}
 		if readErr == io.EOF {

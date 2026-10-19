@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/microsoft/waza/internal/assurance"
+	"github.com/microsoft/waza/internal/controlledprojection"
 	"github.com/microsoft/waza/internal/evidence"
 	"github.com/microsoft/waza/internal/execution"
 	"github.com/microsoft/waza/internal/jsonutil"
@@ -225,10 +226,12 @@ func (p *Prepared) view() (*preparedData, error) {
 func (p *Prepared) RequestDigest() models.EvidenceDigest { return p.requestDigest }
 
 const (
-	collectionSourceBytes   = 256 << 20
-	collectionEncodedBytes  = 128 << 20
-	collectionSourceEntries = 16384
-	collectionPathBytes     = 4096
+	CollectionExecutableBytes = controlledprojection.CollectionExecutableBytes
+	CollectionSourceBytes     = controlledprojection.CollectionSourceBytes
+	collectionSourceBytes     = CollectionSourceBytes
+	collectionEncodedBytes    = 128 << 20
+	collectionSourceEntries   = 16384
+	collectionPathBytes       = 4096
 )
 
 // PrepareCaptured binds a retained inventory's exact source digests without
@@ -254,7 +257,11 @@ func PrepareCaptured(ctx context.Context, arm releasepolicy.Arm, taskID string, 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if source.Path <= last || len(source.Path) > collectionPathBytes || len(source.Bytes) > 128<<20 || !filepath.IsLocal(source.Path) ||
+		sourceLimit := 16 << 20
+		if source.Executable {
+			sourceLimit = CollectionExecutableBytes
+		}
+		if source.Path <= last || len(source.Path) > collectionPathBytes || len(source.Bytes) > sourceLimit || !filepath.IsLocal(source.Path) ||
 			filepath.ToSlash(filepath.Clean(source.Path)) != source.Path || strings.Contains(source.Path, "\\") ||
 			source.Digest != releasepolicy.SourceDigest([]byte(source.Bytes)) {
 			return nil, fmt.Errorf("invalid retained native source inventory")

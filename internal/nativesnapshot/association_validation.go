@@ -280,11 +280,12 @@ func validateProjectionInput(ctx context.Context, input detachedProjectionInput)
 			if err := ctx.Err(); err != nil {
 				return fail(err)
 			}
+			executableLimit, totalLimit := sourceByteLimits(ctx)
 			limit := maxSourceBytes
 			if slices.Contains(source.Roles, "executable") {
-				limit = maxExecutableBytes
+				limit = executableLimit
 			}
-			if len(source.Bytes) > limit || len(source.Bytes) > maxTotalBytes-totalBytes {
+			if len(source.Bytes) > limit || len(source.Bytes) > totalLimit-totalBytes {
 				return fail(fmt.Errorf("native retained source byte limit exceeded"))
 			}
 			totalBytes += len(source.Bytes)

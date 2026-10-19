@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/microsoft/waza/internal/controlledprojection"
 	"github.com/microsoft/waza/internal/evidence"
@@ -24,7 +25,7 @@ type CollectionCapture struct {
 }
 
 func CaptureCollection(ctx context.Context, locations map[releasepolicy.Arm]ArmLocation) (*CollectionCapture, error) {
-	capture, err := prepareProjectionCapture(ctx, locations)
+	capture, err := prepareProjectionCapture(collectionContext(ctx), locations)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +54,7 @@ func (c *CollectionCapture) Projections(ctx context.Context) (map[releasepolicy.
 // facade never exposes mutable capture storage; per-attempt joins retain only
 // bounded request/source descriptors rather than expanding executable bytes.
 func (c *CollectionCapture) initialize(ctx context.Context) error {
+	ctx = collectionContext(ctx)
 	input, err := detachProjectionInput(ctx, c.capture)
 	if err != nil {
 		return err
@@ -74,7 +76,7 @@ func (c *CollectionCapture) initialize(ctx context.Context) error {
 				content = string(entry.Bytes)
 				blobs[entry.Digest.SHA256] = content
 			}
-			c.sources[arm] = append(c.sources[arm], nativetask.CapturedSource{Path: entry.Path, Bytes: content, Digest: entry.Digest})
+			c.sources[arm] = append(c.sources[arm], nativetask.CapturedSource{Path: entry.Path, Bytes: content, Digest: entry.Digest, Executable: slices.Contains(entry.Roles, "executable")})
 		}
 	}
 	return nil
@@ -84,7 +86,7 @@ func (c *CollectionCapture) Recheck(ctx context.Context) error {
 	if c == nil || c.capture == nil {
 		return fmt.Errorf("missing collection capture")
 	}
-	_, err := Recheck(ctx, c.capture.prepared)
+	_, err := Recheck(collectionContext(ctx), c.capture.prepared)
 	return err
 }
 
@@ -192,7 +194,21 @@ func (c *CollectionCapture) Marshal(ctx context.Context) ([]byte, error) {
 			wire.Sources[arm] = append(wire.Sources[arm], source{Path: entry.Path, Roles: entry.Roles, Digest: entry.Digest})
 		}
 	}
-	return json.Marshal(wire)
+	raw, err := json.Marshal(wire)
+	if err != nil {
+		return nil, err
+	}
+	if err := collectionWireSize(len(raw)); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func collectionWireSize(size int) error {
+	if size > CollectionWireBytes {
+		return fmt.Errorf("native capture exceeds retained byte limit")
+	}
+	return nil
 }
 
 // ReadCollectionCapture reconstructs only retained bytes. It never accesses the
@@ -201,8 +217,8 @@ func ReadCollectionCapture(ctx context.Context, raw []byte) (*CollectionCapture,
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if len(raw) > 512<<20 {
-		return nil, fmt.Errorf("native capture exceeds retained byte limit")
+	if err := collectionWireSize(len(raw)); err != nil {
+		return nil, err
 	}
 	if err := models.ValidateNativeJSONKeys(raw, collectionCaptureWire{}); err != nil {
 		return nil, err
@@ -226,8 +242,8 @@ func ReadCollectionCapture(ctx context.Context, raw []byte) (*CollectionCapture,
 			}
 			if !used[entry.Digest.SHA256] {
 				total += len(content)
-				if total > 256<<20 {
-					return nil, fmt.Errorf("native retained unique source blobs exceed 256 MiB")
+				if total > CollectionSourceBytes {
+					return nil, fmt.Errorf("native retained unique source blobs exceed 512 MiB")
 				}
 			}
 			used[entry.Digest.SHA256] = true

@@ -68,7 +68,23 @@ func MockPlan(input SuiteInput) (SourceProjection, error) {
 // NativePlan validates only the offline native declaration/request subset.
 // Runtime labels are unavailable, not an observation of the executable/provider.
 func NativePlan(input SuiteInput) (SourceProjection, error) {
-	if err := validateNative(input, nativeLimits); err != nil {
+	return nativePlan(input, nativeLimits)
+}
+
+const (
+	CollectionExecutableBytes = 256 << 20
+	CollectionSourceBytes     = 512 << 20
+)
+
+// NativeCollectionPlan selects public collection bounds, not the private G1 profile.
+func NativeCollectionPlan(input SuiteInput) (SourceProjection, error) {
+	bound := nativeLimits
+	bound.executable, bound.total = CollectionExecutableBytes, CollectionSourceBytes
+	return nativePlan(input, bound)
+}
+
+func nativePlan(input SuiteInput, bound limits) (SourceProjection, error) {
+	if err := validateNative(input, bound); err != nil {
 		return SourceProjection{}, err
 	}
 	result, err := plan(input, true)
@@ -79,7 +95,7 @@ func NativePlan(input SuiteInput) (SourceProjection, error) {
 	if err != nil {
 		return SourceProjection{}, fmt.Errorf("encoding native source projection: %w", err)
 	}
-	if len(raw) > nativeLimits.projection {
+	if len(raw) > bound.projection {
 		return SourceProjection{}, fmt.Errorf("native source projection exceeds bounded limit")
 	}
 	return result, nil
