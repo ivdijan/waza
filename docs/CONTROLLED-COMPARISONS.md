@@ -69,14 +69,15 @@ legacy-compatible. Collection persists `policy.json`, `core-policy.json`,
 
 The public native profile has explicit admission and persistence bounds:
 selected source files and ordinary evaluator input files are limited to 16 MiB
-each, while the captured evaluator executable is limited to 128 MiB. Aggregate
-sources are limited to 256 MiB and 16,384 entries, and the full capture wire to
-512 MiB. Each digest-only attempt descriptor is limited to 128 MiB, its request
-to 16 MiB, and source paths to 4,096 bytes. Native tapes and record streams are
-limited to 16 MiB. Oversized payloads or aggregate tapes fail explicitly and
-leave durable pending/nonpassing evidence rather than growing without bound or
-silently dropping data. These public 2.0 adapter bounds do not change the
-existing private 1.0 bounds.
+each, while the captured evaluator executable is limited to 256 MiB. Aggregate
+sources are limited to 512 MiB and 16,384 entries, and the full capture wire to
+1 GiB. These are artifact-admission bounds, not process-memory caps; decoding
+large captures may require additional memory. Each digest-only attempt
+descriptor is limited to 128 MiB, its request to 16 MiB, and source paths to
+4,096 bytes. Native tapes and record streams are limited to 16 MiB. Oversized
+payloads or aggregate tapes fail explicitly and leave durable pending/nonpassing
+evidence rather than growing without bound or silently dropping data. These
+public 2.0 adapter bounds do not change the existing private 1.0 bounds.
 
 An operationally incomplete native collection returns nonzero even if core
 publication completed. `native-stop.json` retains the error, budget or
