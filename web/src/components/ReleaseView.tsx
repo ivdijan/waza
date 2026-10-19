@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchReleaseCollections } from "../api/release";
 import type { ReleaseDecision } from "../api/release";
+import NativeReleaseEvidence from "./NativeReleaseEvidence";
+import { downloadText } from "../lib/export";
+import { nativeAttemptsCSV } from "../lib/release-export";
 
 const dimensions = [
   "compatibility", "completeness", "assurance", "golden", "billing",
@@ -62,12 +65,13 @@ function Decision({ decision }: { decision: ReleaseDecision }) {
       {decision.limitations.map((limitation, index) => (
         <p key={index} className="text-xs text-zinc-500">{limitation}</p>
       ))}
+      {decision.native && <NativeReleaseEvidence native={decision.native} />}
     </div>
   );
 }
 
 export default function ReleaseView() {
-  const { data, error, isPending } = useQuery({
+  const { data, error, isPending, isFetching, refetch } = useQuery({
     queryKey: ["release-collections"],
     queryFn: fetchReleaseCollections,
     retry: false,
@@ -79,12 +83,26 @@ export default function ReleaseView() {
         Explicit controlled collections are separate from historical descriptive comparisons.
         Local consistency is not assurance or agent quality.
       </p>
+      <button type="button" disabled={isFetching} onClick={() => void refetch()}
+        className="rounded border border-zinc-600 px-3 py-2 text-sm text-zinc-200 disabled:opacity-50">
+        Refresh release policies
+      </button>
       {isPending && <p className="text-zinc-400">Loading controlled collections...</p>}
       {error && <p role="alert" className="text-red-400">{error.message}</p>}
-      {data?.length === 0 && <p className="text-zinc-400">No controlled collections in the configured local results directory.</p>}
-      {data?.map((collection) => (
+      {!error && data?.length === 0 && <p className="text-zinc-400">No controlled collections in the configured local results directory.</p>}
+      {!error && data?.map((collection) => (
         <article key={collection.path} className="space-y-4 rounded border border-zinc-700 p-5">
           <h2 className="text-lg text-zinc-100">{collection.path}</h2>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="rounded border border-zinc-600 px-3 py-2 text-sm text-zinc-200"
+              onClick={() => downloadText(JSON.stringify(collection, null, 2), "waza-release-decision.json", "application/json")}>
+              Export decision JSON
+            </button>
+            {collection.decision.native && <button type="button" className="rounded border border-zinc-600 px-3 py-2 text-sm text-zinc-200"
+              onClick={() => downloadText(nativeAttemptsCSV(collection), "waza-native-attempts.csv", "text/csv;charset=utf-8;")}>
+              Export native attempts CSV
+            </button>}
+          </div>
           {collection.error && <p role="alert" className="text-amber-400">{collection.error}</p>}
           <Decision decision={collection.decision} />
         </article>

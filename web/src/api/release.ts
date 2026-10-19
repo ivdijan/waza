@@ -25,6 +25,39 @@ export interface ReleaseUsage {
   reason?: string;
 }
 
+export interface NativeAttemptKey {
+  cluster_id: string;
+  task_id: string;
+  trial_ordinal: number;
+  arm: "baseline" | "candidate";
+  eval_id: string;
+  attempt_ordinal: number;
+}
+
+export interface NativeAttempt {
+  key: NativeAttemptKey;
+  status: string;
+  category: string;
+  error: string;
+  output_availability: string;
+  output?: string;
+  event_models: string[] | null;
+  accounting_models: string[] | null;
+  usage_complete: boolean;
+  lifecycle: Record<string, { state: string; reason?: string }>;
+}
+
+export interface NativeDecision {
+  profile: "copilot_sdk_single_turn_text";
+  version: "1.0";
+  attempts: NativeAttempt[] | null;
+  runtime_version: string;
+  provider_currency: string;
+  assurance: string;
+  client_tool_policy: string;
+  budget_contract: string;
+}
+
 export interface ReleaseDecision {
   kind: "waza.release-decision-view";
   version: "1.0";
@@ -44,6 +77,7 @@ export interface ReleaseDecision {
   limitations: string[];
   accounting: Partial<Record<"baseline" | "candidate", ReleaseReliability>>;
   usage: Partial<Record<"baseline" | "candidate", ReleaseUsage[]>>;
+  native?: NativeDecision;
 }
 
 export interface ReleaseCollection {
@@ -60,10 +94,51 @@ function strings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function validNative(value: unknown): value is NativeDecision {
+  if (!record(value)) return false;
+  if (value.profile !== "copilot_sdk_single_turn_text" || value.version !== "1.0") return false;
+  for (const name of ["profile", "version", "runtime_version", "provider_currency", "assurance",
+    "client_tool_policy", "budget_contract"]) {
+    if (typeof value[name] !== "string" || value[name] === "") return false;
+  }
+  if (value.attempts === null) return true;
+  if (!Array.isArray(value.attempts)) return false;
+  const keys = new Set<string>();
+  return value.attempts.every((attempt: unknown) => {
+    if (!record(attempt) || !record(attempt.key) || !record(attempt.lifecycle) ||
+        typeof attempt.usage_complete !== "boolean") return false;
+    const key = attempt.key;
+    for (const name of ["cluster_id", "task_id", "eval_id"]) {
+      if (typeof key[name] !== "string" || key[name] === "") return false;
+    }
+    if (key.arm !== "baseline" && key.arm !== "candidate") return false;
+    for (const name of ["trial_ordinal", "attempt_ordinal"]) {
+      const ordinal = key[name];
+      if (typeof ordinal !== "number" || !Number.isSafeInteger(ordinal) || ordinal < 1) return false;
+    }
+    const identity = JSON.stringify([key.cluster_id, key.task_id, key.trial_ordinal, key.arm, key.eval_id, key.attempt_ordinal]);
+    if (keys.has(identity)) return false;
+    keys.add(identity);
+    for (const name of ["status", "category", "error", "output_availability"]) {
+      if (typeof attempt[name] !== "string") return false;
+    }
+    if (attempt.status === "" || attempt.output_availability === "") return false;
+    if (attempt.output_availability === "available") {
+      if (typeof attempt.output !== "string") return false;
+    } else if (attempt.output_availability !== "unavailable" || attempt.output !== undefined) return false;
+    if (![attempt.event_models, attempt.accounting_models].every((models) =>
+      models === null || (strings(models) && models.every((model) => model !== "")))) return false;
+    return Object.values(attempt.lifecycle).every((phase) =>
+      record(phase) && typeof phase.state === "string" && phase.state !== "" &&
+      (phase.reason === undefined || typeof phase.reason === "string"));
+  });
+}
+
 function validCollection(value: unknown): value is ReleaseCollection {
   if (!record(value) || typeof value.path !== "string" ||
       (value.error !== undefined && typeof value.error !== "string") || !record(value.decision)) return false;
   const d = value.decision;
+  if (Object.prototype.hasOwnProperty.call(d, "native") && !validNative(d.native)) return false;
   if (d.kind !== "waza.release-decision-view" || d.version !== "1.0") {
     throw new Error("Unsupported release decision; not passed.");
   }
@@ -140,6 +215,10 @@ export async function fetchReleaseCollections(): Promise<ReleaseCollection[]> {
     throw new Error(`Release collection API failed (${response.status})`);
   }
   const collections: unknown = await response.json();
+  return parseReleaseCollections(collections);
+}
+
+export function parseReleaseCollections(collections: unknown): ReleaseCollection[] {
   if (!Array.isArray(collections) || !collections.every(validCollection)) {
     throw new Error("Invalid release decision view; not passed.");
   }
