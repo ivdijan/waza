@@ -177,6 +177,8 @@ function validCollection(value: unknown): value is ReleaseCollection {
     }
     if (d.accepted && (counts.planned_trials !== counts.started_trials || counts.planned_trials !== counts.complete_trials ||
         counts.started_attempts !== counts.complete_attempts)) return false;
+    if (d.accepted && record(d.native) && Array.isArray(d.native.attempts) &&
+        d.native.attempts.filter((attempt: NativeAttempt) => attempt.key.arm === arm).length !== counts.complete_attempts) return false;
   }
   for (const [arm, axes] of Object.entries(d.usage)) {
     if (!["baseline", "candidate"].includes(arm) || !Array.isArray(axes)) return false;

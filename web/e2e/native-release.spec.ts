@@ -3,14 +3,18 @@ import { readFile } from "node:fs/promises";
 import { nativeReleaseCollections, nativeScenarios } from "./fixtures/native-release-data";
 import { parseCSV } from "./helpers/csv";
 
-for (const attempts of [null, []]) {
+for (const attempts of [null, [], "partial" as const]) {
   test(`accepted native decision rejects missing observations ${JSON.stringify(attempts)}`, async ({ page }) => {
     const collections = await nativeReleaseCollections("accepted");
     const collection = collections[0];
     if (!collection?.decision.native) throw new Error("Producer fixture must contain native evidence.");
     expect(collection.decision.accepted).toBe(true);
+    expect(collection.decision.accounting.baseline?.complete_attempts).toBe(8);
+    expect(collection.decision.accounting.candidate?.complete_attempts).toBe(8);
     expect(collection.decision.native.attempts).toHaveLength(16);
-    collection.decision.native.attempts = attempts;
+    collection.decision.native.attempts = attempts === "partial"
+      ? collection.decision.native.attempts!.slice(0, 1) : attempts;
+    if (attempts === "partial") expect(collection.decision.native.attempts).toHaveLength(1);
     await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
     await page.goto("/#/release");
     await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
@@ -25,18 +29,57 @@ for (const attempts of [null, []]) {
     if (!collection?.decision.native) throw new Error("Producer fixture must contain native evidence.");
     expect(collection.decision.accepted).toBe(false);
     expect(collection.decision.native.attempts).toHaveLength(2);
-    collection.decision.native.attempts = attempts;
+    collection.decision.native.attempts = attempts === "partial"
+      ? collection.decision.native.attempts!.slice(0, 1) : attempts;
     await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
     await page.goto("/#/release");
     await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(page.getByText("Selected policy: NOT PASSED", { exact: true })).toBeVisible();
-    await expect(page.getByText("No native attempt observations available.", { exact: true })).toBeVisible();
+    if (attempts === "partial") {
+      expect(collection.decision.native.attempts).toHaveLength(1);
+      await expect(page.getByRole("region", { name: "Native attempt observations", exact: true }).locator("tbody tr")).toHaveCount(1);
+      await expect(page.getByText("No native attempt observations available.", { exact: true })).toHaveCount(0);
+    } else {
+      await expect(page.getByText("No native attempt observations available.", { exact: true })).toBeVisible();
+    }
     const downloadEvent = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
     const download = await downloadEvent;
     const path = await download.path();
     expect(path).not.toBeNull();
     expect(JSON.parse(await readFile(path!, "utf8"))).toEqual(collection);
+  });
+}
+
+for (const mutation of ["baseline-only", "candidate-only", "reassigned-arm", "duplicate", "unknown-arm"] as const) {
+  test(`accepted native decision rejects invalid arm inventory ${mutation}`, async ({ page }) => {
+    const collections = await nativeReleaseCollections("accepted");
+    const collection = collections[0];
+    const native = collection?.decision.native;
+    const attempts = native?.attempts;
+    const first = attempts?.[0];
+    if (!collection || !native || !attempts || !first) throw new Error("Producer fixture must contain native evidence.");
+    expect(collection.decision.accepted).toBe(true);
+    expect(attempts).toHaveLength(16);
+    expect(attempts.filter((attempt) => attempt.key.arm === "baseline")).toHaveLength(8);
+    expect(attempts.filter((attempt) => attempt.key.arm === "candidate")).toHaveLength(8);
+    const invalidAttempts = mutation === "baseline-only" || mutation === "candidate-only"
+      ? attempts.filter((attempt) => attempt.key.arm === (mutation === "baseline-only" ? "baseline" : "candidate"))
+      : mutation === "duplicate"
+        ? attempts.map((attempt, index) => index === 1 ? first : attempt)
+        : attempts.map((attempt, index) => index === 0
+          ? { ...attempt, key: { ...attempt.key, arm: mutation === "unknown-arm" ? "unknown"
+            : first.key.arm === "baseline" ? "candidate" : "baseline" } }
+          : attempt);
+    expect(invalidAttempts).not.toEqual(attempts);
+    expect(invalidAttempts).toHaveLength(mutation.endsWith("-only") ? 8 : 16);
+    const invalid = [{ ...collection, decision: { ...collection.decision, native: { ...native, attempts: invalidAttempts } } }];
+    await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: invalid }));
+    await page.goto("/#/release");
+    await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
+    await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toHaveCount(0);
   });
 }
 
