@@ -103,7 +103,7 @@ func collectNative(ctx context.Context, policyData []byte, baseline, candidate S
 			if err := releasepolicy.WriteCollectionArtifact(root, "native-capture.json", captureData); err != nil {
 				return err
 			}
-			tape, err = nativetask.CreateTape(ctx, root, "native")
+			tape, err = nativetask.CreateCollectionTape(ctx, root, "native")
 			return err
 		},
 		BeforeAttempt: func(ctx context.Context, key releasepolicy.AttemptKey) error {

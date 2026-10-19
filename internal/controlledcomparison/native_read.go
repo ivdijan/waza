@@ -218,7 +218,7 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 	if err := errors.Join(eventErr, rowErr, closeErr); err != nil {
 		return decision, err
 	}
-	prefix, err := nativetask.InspectPrefix(ctx, events, rows, admissions)
+	prefix, err := nativetask.InspectCollectionPrefix(ctx, events, rows, admissions)
 	if err != nil {
 		return decision, err
 	}
@@ -228,6 +228,9 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 		return decision, fmt.Errorf("native/core attempt inventory or collection identity differs")
 	}
 	for i, record := range records {
+		if err := releasepolicy.ValidateAttempt(policy, record.Summary); err != nil {
+			return decision, fmt.Errorf("native terminal contradicts selected policy: %w", err)
+		}
 		if err := authorizeNativeStart(policy, view.EvalIDs, records[:i], record.Key); err != nil {
 			return decision, err
 		}
@@ -276,7 +279,7 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 	}
 	if stopped != nil {
 		decision.Accepted = false
-		if decision.Operations.State == "passed" {
+		if decision.Operations.State == "observed" {
 			decision.Operations.State = "failed"
 		}
 		decision.Operations.Reasons = append(decision.Operations.Reasons, stopped.Reason)

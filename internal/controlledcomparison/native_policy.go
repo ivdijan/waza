@@ -281,14 +281,14 @@ func verifyNativeCapture(ctx context.Context, native *NativePolicy, policy *rele
 		if !reflect.DeepEqual(projections[arm].Arm, policy.Arms[arm]) {
 			return fmt.Errorf("native source projection differs from selected policy")
 		}
-		requests := profile.Arms[arm].Requests
+		requests := map[string]models.EvidenceDigest{}
+		for _, request := range profile.Arms[arm].Requests {
+			requests[request.TaskID] = request.RequestDigest
+		}
 		if len(requests) != len(policy.Arms[arm].Plan.Tasks) {
 			return fmt.Errorf("native profile request inventory differs from retained tasks")
 		}
-		for i, task := range policy.Arms[arm].Plan.Tasks {
-			if requests[i].TaskID != task.ID {
-				return fmt.Errorf("native profile request order differs from retained tasks")
-			}
+		for _, task := range policy.Arms[arm].Plan.Tasks {
 			request, err := capture.Request(ctx, arm, task.ID)
 			if err != nil {
 				return err
@@ -297,7 +297,7 @@ func verifyNativeCapture(ctx context.Context, native *NativePolicy, policy *rele
 			if err != nil {
 				return err
 			}
-			if digest != requests[i].RequestDigest {
+			if digest != requests[task.ID] {
 				return fmt.Errorf("native profile request differs from retained source declaration")
 			}
 			if _, err := capture.Primitive(ctx, arm, task.ID); err != nil {

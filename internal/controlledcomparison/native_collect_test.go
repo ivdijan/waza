@@ -150,16 +150,17 @@ func (c *nativeTestClient) ListModels(context.Context) ([]copilot.ModelInfo, err
 }
 
 type nativeTestSession struct {
-	t             *testing.T
-	id            string
-	handlers      []copilot.SessionEventHandler
-	output        string
-	sendErr       error
-	usageErr      error
-	disconnectErr error
-	afterSend     func()
-	inputTokens   int
-	credits       float64
+	t              *testing.T
+	id             string
+	handlers       []copilot.SessionEventHandler
+	output         string
+	sendErr        error
+	usageErr       error
+	disconnectErr  error
+	afterSend      func()
+	inputTokens    int
+	credits        float64
+	expectedPrompt string
 }
 
 func (s *nativeTestSession) SessionID() string { return s.id }
@@ -169,7 +170,11 @@ func (s *nativeTestSession) On(handler copilot.SessionEventHandler) func() {
 	return func() {}
 }
 func (s *nativeTestSession) SendAndWait(_ context.Context, message copilot.MessageOptions) (*copilot.SessionEvent, error) {
-	require.Equal(s.t, "say hello", message.Prompt)
+	expected := s.expectedPrompt
+	if expected == "" {
+		expected = "say hello"
+	}
+	require.Equal(s.t, expected, message.Prompt)
 	event := copilot.SessionEvent{Data: &copilot.AssistantMessageData{Content: s.output, Model: utils.Ptr("fixed-model")}}
 	for _, handler := range s.handlers {
 		handler(event)

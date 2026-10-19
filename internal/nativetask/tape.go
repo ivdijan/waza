@@ -17,21 +17,24 @@ import (
 )
 
 const (
-	payloadFile = "native-task-rows.ndjson"
-	eventFile   = "native-task-events.ndjson"
+	payloadFile           = "native-task-rows.ndjson"
+	eventFile             = "native-task-events.ndjson"
+	CollectionStreamBytes = 16 << 20
 )
 
 // Tape only acknowledges local payload/event persistence. It does not append a
 // core terminal, publish a final ledger, or prove a producer executed anything.
 type Tape struct {
-	root                    *os.Root
-	payload, events         *os.File
-	syncPayload, syncEvents func() error
-	active                  *Admitted
-	sequence                int
-	poisoned                bool
-	started                 map[releasepolicy.AttemptKey]bool
-	collection              string
+	root                                  *os.Root
+	payload, events                       *os.File
+	syncPayload, syncEvents               func() error
+	active                                *Admitted
+	sequence                              int
+	poisoned                              bool
+	started                               map[releasepolicy.AttemptKey]bool
+	collection                            string
+	streamLimit, eventBytes, payloadBytes int
+	admissionRemaining                    int
 }
 
 func syncRoot(root *os.Root) (err error) {
@@ -44,6 +47,16 @@ func syncRoot(root *os.Root) (err error) {
 }
 
 func CreateTape(ctx context.Context, parent *os.Root, name string) (_ *Tape, err error) {
+	return createTape(ctx, parent, name, 0)
+}
+
+// CreateCollectionTape selects the public collection's bounded stream contract.
+// Private tape creation retains its existing admission and persistence behavior.
+func CreateCollectionTape(ctx context.Context, parent *os.Root, name string) (*Tape, error) {
+	return createTape(ctx, parent, name, CollectionStreamBytes)
+}
+
+func createTape(ctx context.Context, parent *os.Root, name string, streamLimit int) (_ *Tape, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -63,7 +76,7 @@ func CreateTape(ctx context.Context, parent *os.Root, name string) (_ *Tape, err
 	if err != nil {
 		return nil, err
 	}
-	tape := &Tape{root: root, started: map[releasepolicy.AttemptKey]bool{}}
+	tape := &Tape{root: root, started: map[releasepolicy.AttemptKey]bool{}, streamLimit: streamLimit, admissionRemaining: collectionEncodedBytes}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, tape.Close())
@@ -101,16 +114,36 @@ func writeSynced(file *os.File, data []byte, sync func() error) error {
 	return sync()
 }
 
-func (t *Tape) appendEvent(event Event) error {
+func (t *Tape) eventData(event Event) ([]byte, error) {
 	event.Kind, event.Version, event.Sequence = eventKind, version, t.sequence+1
 	data, err := json.Marshal(event)
 	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+func (t *Tape) checkStream(size, used int) error {
+	if t.streamLimit > 0 && size > t.streamLimit-used {
+		t.poisoned = true
+		return fmt.Errorf("native collection stream exceeds %d byte limit including newlines; no further starts are permitted", t.streamLimit)
+	}
+	return nil
+}
+
+func (t *Tape) appendEvent(event Event) error {
+	data, err := t.eventData(event)
+	if err != nil {
 		return err
 	}
-	if err := writeSynced(t.events, append(data, '\n'), t.syncEvents); err != nil {
+	if err := t.checkStream(len(data), t.eventBytes); err != nil {
+		return err
+	}
+	if err := writeSynced(t.events, data, t.syncEvents); err != nil {
 		t.poisoned = true
 		return err
 	}
+	t.eventBytes += len(data)
 	t.sequence++
 	return nil
 }
@@ -129,11 +162,20 @@ func (t *Tape) Start(ctx context.Context, admitted *Admitted) error {
 	if t.started[binding.Key] || (t.collection != "" && t.collection != binding.CollectionID) {
 		return fmt.Errorf("native start is repeated or belongs to another collection")
 	}
+	remaining := t.admissionRemaining
+	if t.streamLimit > 0 {
+		remaining, err = prefixAdmissionRemaining(admitted, remaining, true)
+		if err != nil {
+			t.poisoned = true
+			return err
+		}
+	}
 	if err := t.appendEvent(Event{Type: "start", Admission: binding}); err != nil {
 		return err
 	}
 	t.active = admitted
 	t.started[binding.Key], t.collection = true, binding.CollectionID
+	t.admissionRemaining = remaining
 	return nil
 }
 
@@ -150,10 +192,6 @@ func (t *Tape) Complete(ctx context.Context, raw []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := writeSynced(t.payload, append(bytes.Clone(raw), '\n'), t.syncPayload); err != nil {
-		t.poisoned = true
-		return err
-	}
 	binding, err := t.active.Binding()
 	if err != nil {
 		t.poisoned = true
@@ -164,8 +202,23 @@ func (t *Tape) Complete(ctx context.Context, raw []byte) error {
 		t.poisoned = true
 		return err
 	}
-	if err := t.appendEvent(Event{Type: "terminal", Admission: binding, State: record.Summary.Category,
-		RecordDigest: digest, RowDigest: row}); err != nil {
+	terminal := Event{Type: "terminal", Admission: binding, State: record.Summary.Category, RecordDigest: digest, RowDigest: row}
+	data, err := t.eventData(terminal)
+	if err != nil {
+		return err
+	}
+	if err := t.checkStream(len(raw)+1, t.payloadBytes); err != nil {
+		return err
+	}
+	if err := t.checkStream(len(data), t.eventBytes); err != nil {
+		return err
+	}
+	if err := writeSynced(t.payload, append(bytes.Clone(raw), '\n'), t.syncPayload); err != nil {
+		t.poisoned = true
+		return err
+	}
+	t.payloadBytes += len(raw) + 1
+	if err := t.appendEvent(terminal); err != nil {
 		return err
 	}
 	t.active = nil
