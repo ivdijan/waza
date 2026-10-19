@@ -22,21 +22,28 @@ func TestOwnedNativeClientDoesNotAllocateCommandMockRuntime(t *testing.T) {
 			t.Setenv("TMPDIR", directory)
 			t.Setenv("TMP", directory)
 			t.Setenv("TEMP", directory)
-			path := filepath.Join(directory, "reject-copilot")
+			path := filepath.Join(directory, "missing-copilot")
 			if phase != "invalid-path" {
-				require.NoError(t, os.WriteFile(path, []byte("#!/bin/sh\nexit 125\n"), 0o700))
+				// Unlike a shell script, the native test executable starts on Windows
+				// too, then rejects the SDK's CLI flags before running any tests.
+				var err error
+				path, err = os.Executable()
+				require.NoError(t, err)
 			}
 			t.Setenv("COPILOT_CLI_PATH", path)
 			engine := NewCopilotEngineBuilder("fixed-model", &CopilotEngineBuilderOptions{
 				OwnClient: true, DisableCommandMocks: true,
 				DiagnosticObserver: func(ExecutionDiagnostic) error { return nil },
 			}).Build()
+			if phase != "invalid-path" {
+				require.IsType(t, &copilotClientWrapper{}, engine.client)
+			}
 			if phase != "shutdown" {
-				require.Error(t, engine.Initialize(t.Context()))
+				require.ErrorContains(t, engine.Initialize(t.Context()), "initialize/start_failed")
 			}
 			shutdownErr := engine.Shutdown(t.Context())
 			if phase == "startup-failure" {
-				require.ErrorContains(t, shutdownErr, "cleanup")
+				require.ErrorContains(t, shutdownErr, "client_stop/cleanup_failed")
 			} else {
 				require.NoError(t, shutdownErr)
 			}
