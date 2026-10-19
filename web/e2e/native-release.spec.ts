@@ -38,6 +38,17 @@ for (const scenario of nativeScenarios) {
     await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
     await page.goto("/#/release");
     await expect(page.getByText("Selected policy: NOT PASSED", { exact: true })).toBeVisible();
+    const collectionError = collections[0]?.error;
+    if (["initialize", "execute", "shutdown", "disconnect", "empty-output", "unknown-usage"].includes(scenario)) {
+      expect(collectionError).toBe("native collection has a retained failure");
+    }
+    if (collectionError) {
+      await expect(page.getByRole("alert")).toHaveText(collectionError);
+      await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    }
     const evidence = page.getByRole("region", { name: "Native collection evidence", exact: true });
     await expect(evidence.getByText("copilot_sdk_single_turn_text / 1.0", { exact: true })).toBeVisible();
     await expect(evidence.getByText("Declared client tool policy: deny all. This is not server isolation.", { exact: true })).toBeVisible();
@@ -153,13 +164,14 @@ test("native failed lifecycle retains its reason and unattempted prerequisites",
   );
 });
 
-for (const scenario of ["accepted", "retry", "unknown-usage"] as const) {
+for (const scenario of ["accepted", "retry", "initialize", "unknown-usage", "unknown-budget", "reached-budget"] as const) {
   test(`native ${scenario} JSON and CSV downloads preserve exact policy, attempts and usage`, async ({ page }) => {
     const collections = await nativeReleaseCollections(scenario);
     const collection = collections[0];
     if (!collection?.decision.native?.attempts?.length) throw new Error("Producer fixture must contain native attempts.");
     await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
     await page.goto("/#/release");
+    if (collection.error) await expect(page.getByRole("alert")).toHaveText(collection.error);
     const jsonEvent = page.waitForEvent("download");
     await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
     const json = await jsonEvent;
