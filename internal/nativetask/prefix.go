@@ -85,6 +85,9 @@ func prefixInputsProfile(ctx context.Context, events, payload []byte, admissions
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if collection {
+			remaining = admissionLimit
+		}
 		var err error
 		remaining, err = prefixAdmissionRemaining(admitted, remaining, collection)
 		if err != nil {
@@ -115,7 +118,11 @@ func prefixAdmissionRemaining(admitted *Admitted, remaining int, collection bool
 			return 0, fmt.Errorf("native collection prefix requires public 2.0 preparation")
 		}
 	}
-	remaining -= size
+	// Public descriptors have their own byte limit; their bindings are
+	// separately bounded here and by the actual event stream.
+	if !collection {
+		remaining -= size
+	}
 	if remaining < prefixBindingOverhead {
 		return 0, fmt.Errorf("native prefix exceeds retained admission byte limit")
 	}

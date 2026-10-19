@@ -34,7 +34,6 @@ type Tape struct {
 	started                               map[releasepolicy.AttemptKey]bool
 	collection                            string
 	streamLimit, eventBytes, payloadBytes int
-	admissionRemaining                    int
 }
 
 func syncRoot(root *os.Root) (err error) {
@@ -76,7 +75,7 @@ func createTape(ctx context.Context, parent *os.Root, name string, streamLimit i
 	if err != nil {
 		return nil, err
 	}
-	tape := &Tape{root: root, started: map[releasepolicy.AttemptKey]bool{}, streamLimit: streamLimit, admissionRemaining: collectionEncodedBytes}
+	tape := &Tape{root: root, started: map[releasepolicy.AttemptKey]bool{}, streamLimit: streamLimit}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, tape.Close())
@@ -162,9 +161,8 @@ func (t *Tape) Start(ctx context.Context, admitted *Admitted) error {
 	if t.started[binding.Key] || (t.collection != "" && t.collection != binding.CollectionID) {
 		return fmt.Errorf("native start is repeated or belongs to another collection")
 	}
-	remaining := t.admissionRemaining
 	if t.streamLimit > 0 {
-		remaining, err = prefixAdmissionRemaining(admitted, remaining, true)
+		_, err = prefixAdmissionRemaining(admitted, collectionEncodedBytes, true)
 		if err != nil {
 			t.poisoned = true
 			return err
@@ -175,7 +173,6 @@ func (t *Tape) Start(ctx context.Context, admitted *Admitted) error {
 	}
 	t.active = admitted
 	t.started[binding.Key], t.collection = true, binding.CollectionID
-	t.admissionRemaining = remaining
 	return nil
 }
 
