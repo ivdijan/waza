@@ -10,7 +10,6 @@ import (
 	"github.com/microsoft/waza/internal/controlledprojection"
 	"github.com/microsoft/waza/internal/evidence"
 	"github.com/microsoft/waza/internal/execution"
-	"github.com/microsoft/waza/internal/jsonutil"
 	"github.com/microsoft/waza/internal/models"
 	"github.com/microsoft/waza/internal/nativetask"
 	"github.com/microsoft/waza/internal/releasepolicy"
@@ -204,9 +203,6 @@ func ReadCollectionCapture(ctx context.Context, raw []byte) (*CollectionCapture,
 	}
 	if len(raw) > 512<<20 {
 		return nil, fmt.Errorf("native capture exceeds retained byte limit")
-	}
-	if _, err := jsonutil.Parse(raw); err != nil {
-		return nil, err
 	}
 	if err := models.ValidateNativeJSONKeys(raw, collectionCaptureWire{}); err != nil {
 		return nil, err
