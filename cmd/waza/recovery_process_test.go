@@ -129,7 +129,7 @@ func TestRecoveryMCPMockProcessStdinLifecycle(t *testing.T) {
 			// unlike the interruptible io.Pipe endpoints in serving tests.
 			config := base64.StdEncoding.EncodeToString([]byte(`{"name":"dependency"}`))
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			defer cancel()
+			t.Cleanup(cancel)
 			child := exec.CommandContext(ctx, binary, "__mcp-mock", "--config-base64", config)
 			child.Stdin = input
 			child.Env = append(os.Environ(), "WAZA_NO_UPDATE_CHECK=1")
@@ -137,18 +137,34 @@ func TestRecoveryMCPMockProcessStdinLifecycle(t *testing.T) {
 			child.Stderr = &stderr
 			output, err := child.StdoutPipe()
 			require.NoError(t, err)
-			require.NoError(t, child.Start())
+			started := time.Now()
+			err = child.Start()
+			startElapsed := time.Since(started)
+			require.NoError(t, err, "MCP start elapsed: %s; context: %v", startElapsed, ctx.Err())
 			waited := false
+			var writeElapsed, decodeElapsed time.Duration
+			// t.Context is canceled before cleanup, so snapshot before assertions.
+			var initializeContextErr error
 			t.Cleanup(func() {
 				if !waited {
 					cancel()
-					require.Error(t, child.Wait())
+					waitErr := child.Wait()
+					t.Logf("MCP subprocess failure: start elapsed: %s; write elapsed: %s; decode elapsed: %s; context after initialize I/O before cleanup cancel: %v; joined child Wait: %v; process state: %v; stderr: %s",
+						startElapsed, writeElapsed, decodeElapsed, initializeContextErr, waitErr, child.ProcessState, stderr.String())
+					require.Error(t, waitErr)
 				}
 			})
+			writeStarted := time.Now()
 			_, err = io.WriteString(send, "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"id\":1}\n")
+			writeElapsed = time.Since(writeStarted)
+			initializeContextErr = ctx.Err()
 			require.NoError(t, err)
 			var response jsonrpc.Response
-			require.NoError(t, json.NewDecoder(output).Decode(&response))
+			decodeStarted := time.Now()
+			err = json.NewDecoder(output).Decode(&response)
+			decodeElapsed = time.Since(decodeStarted)
+			initializeContextErr = ctx.Err()
+			require.NoError(t, err)
 			require.JSONEq(t, "1", string(response.ID))
 			require.Nil(t, response.Error)
 			require.NotNil(t, response.Result, "the actual subprocess must be serving before shutdown")
