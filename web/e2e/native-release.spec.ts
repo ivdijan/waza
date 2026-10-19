@@ -71,14 +71,51 @@ for (const scenario of nativeScenarios) {
       await expect(page.getByText(/ai_credits : 0/)).toHaveCount(0);
     }
     if (scenario === "unknown-budget") {
-      const baseline = page.getByRole("heading", { name: "baseline", exact: true }).locator("..");
-      const candidate = page.getByRole("heading", { name: "candidate", exact: true }).locator("..");
-      await expect(baseline.getByText(/ai_credits : unavailable \(unknown\)/)).toBeVisible();
-      await expect(baseline.getByText(/ai_credits : 0/)).toHaveCount(0);
-      await expect(candidate.getByText("ai_credits : 0 (final_complete_attributable)", { exact: true })).toBeVisible();
+      const startedArm = attempts[0]?.key.arm;
+      if (!startedArm) throw new Error("Budget fixture must identify the started arm.");
+      const unstartedArm = startedArm === "baseline" ? "candidate" : "baseline";
+      expect(collections[0]?.decision.accounting[startedArm]?.started_attempts).toBe(1);
+      expect(collections[0]?.decision.accounting[unstartedArm]?.started_attempts).toBe(0);
+      const started = page.getByRole("heading", { name: startedArm, exact: true }).locator("..");
+      const unstarted = page.getByRole("heading", { name: unstartedArm, exact: true }).locator("..");
+      await expect(started.getByText(/ai_credits : unavailable \(unknown\)/)).toBeVisible();
+      await expect(started.getByText(/ai_credits : 0/)).toHaveCount(0);
+      await expect(unstarted.getByText("ai_credits : 0 (final_complete_attributable)", { exact: true })).toBeVisible();
+      await expect(page.getByText(
+        "admitting next attempt: required prior input_tokens usage is unavailable; no further native attempt may start",
+        { exact: true },
+      )).toBeVisible();
+    }
+    if (scenario === "reached-budget") {
+      await expect(page.getByText(
+        "admitting next attempt: observed input_tokens budget is reached/exceeded; no further native attempt may start (in-flight overshoot is possible)",
+        { exact: true },
+      )).toBeVisible();
     }
   });
 }
+
+test("accepted native producer collection displays its complete matched evidence without recomputing policy", async ({ page }) => {
+  const collections = await nativeReleaseCollections("accepted");
+  const decision = collections[0]?.decision;
+  expect(decision?.accepted).toBe(true);
+  expect(decision?.planned_clusters).toBe(8);
+  expect(decision?.native?.attempts).toHaveLength(16);
+  expect(decision?.statistics.state).toBe("noninferiority");
+  await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+  await page.goto("/#/release");
+  await expect(page.getByText("Selected policy: PASSED", { exact: true })).toBeVisible();
+  await expect(page.getByText("Selected policy: NOT PASSED", { exact: true })).toHaveCount(0);
+  const observations = page.getByRole("region", { name: "Native attempt observations", exact: true });
+  await expect(observations.locator("tbody tr")).toHaveCount(16);
+  await expect(observations.getByText("Status: passed", { exact: true })).toHaveCount(16);
+  await expect(observations.getByText("Usage: complete", { exact: true })).toHaveCount(16);
+  await expect(page.getByText("Trials: 8/8 started, 8 complete. Attempts: 8 started, 8 complete.", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("First-attempt passes: 8; retry-policy passes: 8; recovered: 0.", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("First-attempt rate: 100.0%; retry-policy rate: 100.0%.", { exact: true })).toHaveCount(2);
+  await expect(page.getByText("ai_credits : 0 (final_complete_attributable)", { exact: true })).toHaveCount(2);
+  await expect(page.getByText(/^Fixed-suite estimate .*8 planned clusters; retries are not iid samples\.$/)).toBeVisible();
+});
 
 test("native output and lifecycle details support keyboard access and mobile scrolling", async ({ page }) => {
   const collections = await nativeReleaseCollections("retry");
@@ -116,8 +153,8 @@ test("native failed lifecycle retains its reason and unattempted prerequisites",
   );
 });
 
-for (const scenario of ["retry", "unknown-usage"] as const) {
-  test(`native ${scenario} JSON and CSV downloads preserve row identities, outputs and unavailable usage`, async ({ page }) => {
+for (const scenario of ["accepted", "retry", "unknown-usage"] as const) {
+  test(`native ${scenario} JSON and CSV downloads preserve exact policy, attempts and usage`, async ({ page }) => {
     const collections = await nativeReleaseCollections(scenario);
     const collection = collections[0];
     if (!collection?.decision.native?.attempts?.length) throw new Error("Producer fixture must contain native attempts.");
@@ -149,6 +186,7 @@ for (const scenario of ["retry", "unknown-usage"] as const) {
         return row?.[column];
       };
       expect(value("Arm")).toBe(attempt.key.arm);
+      expect(value("Selected policy accepted")).toBe(String(collection.decision.accepted));
       expect(value("Cluster")).toBe(attempt.key.cluster_id);
       expect(value("Task")).toBe(attempt.key.task_id);
       expect(value("Trial")).toBe(String(attempt.key.trial_ordinal));
@@ -174,7 +212,7 @@ for (const scenario of ["retry", "unknown-usage"] as const) {
 for (const malformed of ["version", "profile", "usage_complete", "models", "output_missing", "output_unavailable",
   "lifecycle", "ordinal", "duplicate"]) {
   test(`native admission rejects mutated producer ${malformed}`, async ({ page }) => {
-    const collections = await nativeReleaseCollections("passed");
+    const collections = await nativeReleaseCollections("accepted");
     const collection = collections[0];
     const native = collection?.decision.native;
     const first = native?.attempts?.[0];
@@ -196,5 +234,6 @@ for (const malformed of ["version", "profile", "usage_complete", "models", "outp
     await page.goto("/#/release");
     await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
     await expect(page.getByRole("table")).toHaveCount(0);
+    await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
   });
 }
