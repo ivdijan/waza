@@ -68,8 +68,9 @@ legacy-compatible. Collection persists `policy.json`, `core-policy.json`,
 `native/native-task-events.ndjson` plus `native/native-task-rows.ndjson`.
 
 The public native profile has explicit admission and persistence bounds:
-selected source files are limited to 16 MiB each, evaluator inputs to 128 MiB,
-aggregate sources to 256 MiB and 16,384 entries, and the full capture wire to
+selected source files and ordinary evaluator input files are limited to 16 MiB
+each, while the captured evaluator executable is limited to 128 MiB. Aggregate
+sources are limited to 256 MiB and 16,384 entries, and the full capture wire to
 512 MiB. Each digest-only attempt descriptor is limited to 128 MiB, its request
 to 16 MiB, and source paths to 4,096 bytes. Native tapes and record streams are
 limited to 16 MiB. Oversized payloads or aggregate tapes fail explicitly and

@@ -39,8 +39,8 @@ test('controlled comparison guide exposes the real offline boundary and distinct
   await expect(page.locator('main')).toContainText('Client tool denial is not server isolation');
   await expect(page.locator('main')).toContainText('required collection_profile: "copilot_sdk_single_turn_text_v1" discriminator');
   await expect(page.locator('main')).toContainText('Frozen core-only readers reject both the outer envelope and an extracted core policy');
-  await expect(page.locator('main')).toContainText('selected source files to 16 MiB each');
-  await expect(page.locator('main')).toContainText('aggregate sources to 256 MiB and 16,384 entries');
+  await expect(page.locator('main')).toContainText('selected source files and ordinary evaluator input files to 16 MiB each, while the captured evaluator executable is limited to 128 MiB');
+  await expect(page.locator('main')).toContainText('Aggregate sources are limited to 256 MiB and 16,384 entries');
   await expect(page.locator('main')).toContainText('Native tapes and record streams are limited to 16 MiB');
   await expect(page.locator('main')).toContainText('Operationally incomplete native collection returns nonzero even if core publication completed');
   await expect(page.locator('main')).toContainText('native-stop.json');

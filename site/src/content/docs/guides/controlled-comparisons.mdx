@@ -134,14 +134,15 @@ policy with that unknown discriminator; stripping the wrapper does not make
 native policy legacy-compatible. Ordinary mock policy and gate defaults do
 not change.
 
-The public native 2.0 adapter bounds selected source files to 16 MiB each,
-evaluator inputs to 128 MiB, aggregate sources to 256 MiB and 16,384 entries,
-and the full capture wire to 512 MiB. Per-attempt digest-only descriptors are
-limited to 128 MiB, requests to 16 MiB and source paths to 4,096 bytes. Native
-tapes and record streams are limited to 16 MiB. Oversized payloads or
-aggregate tapes fail explicitly, leaving durable pending/nonpassing evidence;
-the adapter does not silently discard data or promise unbounded retention.
-These public bounds do not change existing private 1.0 bounds.
+The public native 2.0 adapter bounds selected source files and ordinary
+evaluator input files to 16 MiB each, while the captured evaluator executable
+is limited to 128 MiB. Aggregate sources are limited to 256 MiB and 16,384
+entries, and the full capture wire to 512 MiB. Per-attempt digest-only
+descriptors are limited to 128 MiB, requests to 16 MiB and source paths to
+4,096 bytes. Native tapes and record streams are limited to 16 MiB. Oversized
+payloads or aggregate tapes fail explicitly, leaving durable pending/nonpassing
+evidence; the adapter does not silently discard data or promise unbounded
+retention. These public bounds do not change existing private 1.0 bounds.
 
 Operationally incomplete native collection returns nonzero even if core
 publication completed. `native-stop.json` retains the error, budget or
