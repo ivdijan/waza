@@ -34,6 +34,38 @@ type Decision struct {
 	Limitations     []string            `json:"limitations"`
 	Accounting      map[Arm]Reliability `json:"accounting"`
 	Usage           map[Arm][]UsageAxis `json:"usage"`
+	Native          *NativeDecision     `json:"native,omitempty"`
+}
+
+// NativeDecision is optional: legacy/offline decisions retain their original
+// wire shape. Native profile evidence is populated only by its full reader.
+type NativeDecision struct {
+	Profile          string              `json:"profile"`
+	Version          string              `json:"version"`
+	Attempts         []NativeAttemptView `json:"attempts"`
+	RuntimeVersion   string              `json:"runtime_version"`
+	ProviderCurrency string              `json:"provider_currency"`
+	Assurance        string              `json:"assurance"`
+	ClientToolPolicy string              `json:"client_tool_policy"`
+	BudgetContract   string              `json:"budget_contract"`
+}
+
+type NativeAttemptView struct {
+	Key                AttemptKey                 `json:"key"`
+	Status             string                     `json:"status"`
+	Category           string                     `json:"category"`
+	Error              string                     `json:"error"`
+	OutputAvailability string                     `json:"output_availability"`
+	Output             *string                    `json:"output,omitempty"`
+	EventModels        []string                   `json:"event_models"`
+	AccountingModels   []string                   `json:"accounting_models"`
+	UsageComplete      bool                       `json:"usage_complete"`
+	Lifecycle          map[string]NativePhaseView `json:"lifecycle"`
+}
+
+type NativePhaseView struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type Reliability struct {

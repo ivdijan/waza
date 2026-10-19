@@ -31,11 +31,11 @@ func (sources controlledSources) validate() error {
 
 func newComparePlanCommand() *cobra.Command {
 	var sources controlledSources
-	var designPath, requirementsPath, output string
+	var designPath, requirementsPath, output, collector string
 	var allowed []string
 	cmd := &cobra.Command{
 		Use: "compare-plan", Short: "Bind an explicit fixed design to inspected offline comparison sources",
-		Long: "Create a private release-policy 1.0 artifact before collecting outcomes. Currently supports mock/no-skills execution with native text checks only. Static planning is not assurance, runtime readiness, agent quality, or authenticated provenance.",
+		Long: "Create a fixed precollection policy. Default mock collection is offline. Explicit --collector native-copilot selects the bounded Copilot SDK single-turn/no-skills/deny-all-client-tools/text profile. Planning never launches the SDK. Native collection can incur provider usage; deny-all client tools is not server isolation. Static planning is not assurance or authenticated provenance.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := sources.validate(); err != nil {
@@ -60,7 +60,15 @@ func newComparePlanCommand() *cobra.Command {
 			if err != nil {
 				return &ExitCodeError{Code: 1, Err: err}
 			}
-			data, err := controlledcomparison.Plan(sources.baseline, sources.candidate, design, requirements, allowed)
+			var data []byte
+			switch collector {
+			case "mock":
+				data, err = controlledcomparison.Plan(sources.baseline, sources.candidate, design, requirements, allowed)
+			case "native-copilot":
+				data, err = controlledcomparison.PlanNative(cmd.Context(), sources.baseline, sources.candidate, design, requirements, allowed)
+			default:
+				err = fmt.Errorf("unsupported collector %q; select mock or native-copilot", collector)
+			}
 			if err != nil {
 				return &ExitCodeError{Code: 1, Err: err}
 			}
@@ -79,6 +87,7 @@ func newComparePlanCommand() *cobra.Command {
 		},
 	}
 	sources.flags(cmd)
+	cmd.Flags().StringVar(&collector, "collector", "mock", "Explicit collection profile: mock (offline) or native-copilot (paid-capable collection)")
 	cmd.Flags().StringVar(&designPath, "design", "", "Explicit fixed-design JSON; allocation must be empty")
 	cmd.Flags().StringVar(&requirementsPath, "requirements", "", "Explicit selected identity/runtime/assurance/billing requirements JSON")
 	cmd.Flags().StringSliceVar(&allowed, "allow-change", nil, "Declared changed fields: engine, model, reasoning_effort")
@@ -88,11 +97,11 @@ func newComparePlanCommand() *cobra.Command {
 
 func newCompareCollectCommand() *cobra.Command {
 	var sources controlledSources
-	var policyPath, directory string
+	var policyPath, directory, collector string
 	var assurance assuranceFlags
 	cmd := &cobra.Command{
 		Use: "compare-collect", Short: "Collect fresh paired offline attempts under a predeclared policy",
-		Long: "Reinspect and bind both sources before BEGIN, then each attempt before executing its frozen inputs. Durable starts precede fresh mock-engine initialization. New directory only; no cached outcomes, historical adoption, resume, adaptive stopping, or live/paid execution.",
+		Long: "Reinspect both sources and execute frozen inputs after durable starts. Default mock collection is offline. Explicit --collector native-copilot may incur provider usage and requires its separately versioned native policy. Each attempt owns a fresh SDK client/session/workspace. Budgets use final observations and best-effort start checks, not hard caps; in-flight overshoot is possible and unknown required prior usage blocks further starts. New Linux/macOS directory only; no cache, historical adoption, resume, or adaptive stopping.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := sources.validate(); err != nil {
@@ -108,7 +117,17 @@ func newCompareCollectCommand() *cobra.Command {
 			if err != nil {
 				return &ExitCodeError{Code: 1, Err: err}
 			}
-			if assurance.selected(cmd) {
+			if collector != "mock" && collector != "native-copilot" {
+				return &ExitCodeError{Code: 1, Err: fmt.Errorf("unsupported collector %q", collector)}
+			}
+			if collector == "native-copilot" {
+				if assurance.selected(cmd) {
+					return &ExitCodeError{Code: 1, Err: fmt.Errorf("native collection does not support authored offline assurance")}
+				}
+				if err := controlledcomparison.CollectNative(cmd.Context(), data, sources.baseline, sources.candidate, directory); err != nil {
+					return &ExitCodeError{Code: 1, Err: err}
+				}
+			} else if assurance.selected(cmd) {
 				if err := assurance.sources(cmd); err != nil {
 					return &ExitCodeError{Code: 1, Err: err}
 				}
@@ -127,6 +146,7 @@ func newCompareCollectCommand() *cobra.Command {
 		},
 	}
 	sources.flags(cmd)
+	cmd.Flags().StringVar(&collector, "collector", "mock", "Explicit collection profile: mock (offline) or native-copilot (may incur provider usage)")
 	cmd.Flags().StringVar(&policyPath, "release-policy", "", "Explicit precollection policy JSON (required)")
 	cmd.Flags().StringVar(&directory, "collection-dir", "", "New private collection directory (required)")
 	assurance.flags(cmd, false)

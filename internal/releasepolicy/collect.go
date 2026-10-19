@@ -24,6 +24,13 @@ type Collector struct {
 	Usage         func(context.Context, Arm) ([]UsageAxis, error)
 	Shutdown      func(context.Context) error
 	BeforePublish func(context.Context) error
+	// Owned collection adapters may publish a separately versioned policy
+	// envelope while retaining the unchanged core protocol in core-policy.json.
+	PolicyEnvelope []byte
+	CollectionID   string
+	Open           func(context.Context, *os.Root, string, map[Arm]string) error
+	BeforeAttempt  func(context.Context, AttemptKey) error
+	PersistAttempt func(context.Context, AttemptObservation) error
 }
 
 type AttemptObservation struct {
@@ -45,6 +52,9 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 	if err != nil {
 		return err
 	}
+	if p.CollectionProfile != "" && collector.PolicyEnvelope == nil {
+		return fmt.Errorf("native collection profile requires its separate policy envelope")
+	}
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		return fmt.Errorf("private durable release collection is unsupported on %s; legacy evaluation remains available", runtime.GOOS)
 	}
@@ -58,13 +68,38 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 	if assured != nil {
 		collectionID = assured.contract.Digest.SHA256
 	}
-	if err := os.Mkdir(directory, 0o700); err != nil {
+	if collector.CollectionID != "" {
+		collectionID = collector.CollectionID
+	}
+	parent, err := os.OpenRoot(filepath.Dir(filepath.Clean(directory)))
+	if err != nil {
+		return fmt.Errorf("opening collection parent: %w", err)
+	}
+	defer func() { err = errors.Join(err, parent.Close()) }()
+	name := filepath.Base(filepath.Clean(directory))
+	if name == "." || name == ".." {
+		return fmt.Errorf("collection requires a new direct directory")
+	}
+	if err := parent.Mkdir(name, 0o700); err != nil {
 		return fmt.Errorf("reserving new collection directory (no resume): %w", err)
 	}
-	if err := syncDirectory(filepath.Dir(directory)); err != nil {
+	if err := syncCollectionRoot(parent); err != nil {
 		return err
 	}
-	if err := writeExclusive(directory, "policy.json", policyData); err != nil {
+	root, err := parent.OpenRoot(name)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	write := func(name string, data []byte) error { return WriteCollectionArtifact(root, name, data) }
+	policyName := "policy.json"
+	if collector.PolicyEnvelope != nil {
+		if err := write("policy.json", collector.PolicyEnvelope); err != nil {
+			return err
+		}
+		policyName = "core-policy.json"
+	}
+	if err := write(policyName, policyData); err != nil {
 		return err
 	}
 	if assured != nil {
@@ -73,7 +108,7 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 		}
 		defer func() { err = errors.Join(err, assured.close()) }()
 	}
-	stream, err := os.OpenFile(filepath.Join(directory, "journal.ndjson"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	stream, err := root.OpenFile("journal.ndjson", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("creating ordered event stream: %w", err)
 	}
@@ -81,7 +116,7 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 	if err := stream.Sync(); err != nil {
 		return fmt.Errorf("syncing empty event stream: %w", err)
 	}
-	if err := syncDirectory(directory); err != nil {
+	if err := syncCollectionRoot(root); err != nil {
 		return err
 	}
 	journal := Journal{Kind: JournalKind, Version: Version, CollectionID: collectionID, Events: []Event{}}
@@ -123,7 +158,7 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 		if err != nil {
 			return err
 		}
-		if err := writeExclusive(directory, string(arm)+".begin.json", data); err != nil {
+		if err := write(string(arm)+".begin.json", data); err != nil {
 			return err
 		}
 		if err := appendEvent(Event{Type: "begin_arm", Arm: arm, EvalID: eval}); err != nil {
@@ -131,6 +166,11 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 		}
 	}
 	defer func() { err = errors.Join(err, collector.Shutdown(context.WithoutCancel(ctx))) }()
+	if collector.Open != nil {
+		if err := collector.Open(ctx, root, collectionID, evals); err != nil {
+			return fmt.Errorf("opening collection instrumentation: %w", err)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -151,6 +191,11 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 							return err
 						}
 						key := AttemptKey{SampleKey: sample, Arm: arm, EvalID: evals[arm], Attempt: ordinal}
+						if collector.BeforeAttempt != nil {
+							if err := collector.BeforeAttempt(ctx, key); err != nil {
+								return fmt.Errorf("admitting next attempt: %w", err)
+							}
+						}
 						if err := appendEvent(Event{Type: "attempt_start", Key: &key}); err != nil {
 							return err
 						}
@@ -171,6 +216,11 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 						if assured != nil {
 							if err := assured.append(observation); err != nil {
 								return fmt.Errorf("persisting full assurance attempt before core terminal: %w", err)
+							}
+						}
+						if collector.PersistAttempt != nil {
+							if err := collector.PersistAttempt(context.WithoutCancel(ctx), observation); err != nil {
+								return fmt.Errorf("persisting native attempt before core terminal: %w", err)
 							}
 						}
 						if err := appendEvent(Event{Type: "attempt_terminal", Attempt: &attempt}); err != nil {
@@ -233,7 +283,7 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 	if err != nil {
 		return err
 	}
-	if err := writeExclusive(directory, "journal.json", data); err != nil {
+	if err := write("journal.json", data); err != nil {
 		return err
 	}
 	for _, arm := range []Arm{Baseline, Candidate} {
@@ -242,23 +292,24 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 		if err != nil {
 			return err
 		}
-		if err := writeExclusive(directory, string(arm)+".results.json", result); err != nil {
+		if err := write(string(arm)+".results.json", result); err != nil {
 			return err
 		}
 		binding, err := json.Marshal(r.Binding)
 		if err != nil {
 			return err
 		}
-		if err := writeExclusive(directory, string(arm)+".result-binding.json", binding); err != nil {
+		if err := write(string(arm)+".result-binding.json", binding); err != nil {
 			return err
 		}
 		data, err := SealJSON(r)
 		if err != nil {
 			return err
 		}
-		if err := writeExclusive(directory, string(arm)+".final.json", data); err != nil {
+		if err := write(string(arm)+".final.json", data); err != nil {
 			return err
 		}
+
 	}
 	if assured != nil {
 		if err := assured.finish(directory, p, sealed); err != nil {
@@ -266,6 +317,36 @@ func collect(ctx context.Context, policyData []byte, directory string, collector
 		}
 	}
 	return nil
+}
+
+func syncCollectionRoot(root *os.Root) (err error) {
+	directory, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, directory.Close()) }()
+	return directory.Sync()
+}
+
+// WriteCollectionArtifact writes exclusively through the retained owned root.
+func WriteCollectionArtifact(root *os.Root, name string, data []byte) (err error) {
+	if root == nil || name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return fmt.Errorf("collection artifact requires a direct owned leaf")
+	}
+	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("creating collection artifact %s: %w", name, err)
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	if n, err := file.Write(data); err != nil {
+		return fmt.Errorf("writing collection artifact %s: %w", name, err)
+	} else if n != len(data) {
+		return fmt.Errorf("short write of collection artifact %s", name)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("syncing collection artifact %s: %w", name, err)
+	}
+	return syncCollectionRoot(root)
 }
 
 func newIdentity() (string, error) {

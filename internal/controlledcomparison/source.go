@@ -147,6 +147,18 @@ func prepare(source Source) (*preparedPlan, error) {
 // task names, retries, repeated trials, static readiness or mock labels.
 func Plan(baseline, candidate Source, design releasepolicy.Design, requirements releasepolicy.Requirements, allowedFields []string) ([]byte, error) {
 	sources := map[releasepolicy.Arm]Source{releasepolicy.Baseline: baseline, releasepolicy.Candidate: candidate}
+	projections := map[releasepolicy.Arm]controlledprojection.SourceProjection{}
+	for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
+		prepared, err := prepare(sources[arm])
+		if err != nil {
+			return nil, fmt.Errorf("%s source: %w", arm, err)
+		}
+		projections[arm] = controlledprojection.SourceProjection{Arm: prepared.plan, GoldenIDs: prepared.golden}
+	}
+	return planProjections(projections, design, requirements, allowedFields)
+}
+
+func planProjections(projections map[releasepolicy.Arm]controlledprojection.SourceProjection, design releasepolicy.Design, requirements releasepolicy.Requirements, allowedFields []string) ([]byte, error) {
 	p := releasepolicy.Policy{Kind: releasepolicy.PolicyKind, Version: releasepolicy.Version,
 		Design: design, Requirements: requirements, Arms: map[releasepolicy.Arm]releasepolicy.PolicyArm{},
 		Changes: []releasepolicy.AllowedChange{}, GoldenIDs: []string{},
@@ -161,14 +173,8 @@ func Plan(baseline, candidate Source, design releasepolicy.Design, requirements 
 		}
 		allowed[field] = true
 	}
-	projections := map[releasepolicy.Arm]controlledprojection.SourceProjection{}
 	for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
-		prepared, err := prepare(sources[arm])
-		if err != nil {
-			return nil, fmt.Errorf("%s source: %w", arm, err)
-		}
-		p.Arms[arm] = prepared.plan
-		projections[arm] = controlledprojection.SourceProjection{Arm: prepared.plan, GoldenIDs: prepared.golden}
+		p.Arms[arm] = projections[arm].Arm
 	}
 	for _, before := range p.Arms[releasepolicy.Baseline].Plan.Tasks {
 		for _, after := range p.Arms[releasepolicy.Candidate].Plan.Tasks {

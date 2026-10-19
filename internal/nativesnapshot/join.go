@@ -33,6 +33,10 @@ type joinSeal struct {
 // resolver request and its complete arm inventory. It does not call Recheck:
 // source currentness, root authenticity and policy order remain outside this join.
 func CheckPrimitiveJoin(ctx context.Context, prepared *Prepared, admitted *nativetask.Admitted, expectedKey releasepolicy.AttemptKey) (*Joined, error) {
+	return checkPrimitiveJoin(ctx, prepared, admitted, expectedKey, false)
+}
+
+func checkPrimitiveJoin(ctx context.Context, prepared *Prepared, admitted *nativetask.Admitted, expectedKey releasepolicy.AttemptKey, collection bool) (*Joined, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -61,7 +65,11 @@ func CheckPrimitiveJoin(ctx context.Context, prepared *Prepared, admitted *nativ
 			Path: source.Path, Bytes: string(source.Bytes), Digest: source.Digest,
 		})
 	}
-	if err := nativetask.MatchSnapshot(ctx, admitted, expectedKey, request, captured); err != nil {
+	match := nativetask.MatchSnapshot
+	if collection {
+		match = nativetask.MatchCollectionSnapshot
+	}
+	if err := match(ctx, admitted, expectedKey, request, captured); err != nil {
 		return nil, err
 	}
 	binding, err := admitted.Binding()

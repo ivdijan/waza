@@ -130,16 +130,17 @@ type Requirements struct {
 }
 
 type Policy struct {
-	Kind         string                `json:"kind"`
-	Version      string                `json:"version"`
-	Digest       models.EvidenceDigest `json:"digest"`
-	Design       Design                `json:"design"`
-	Arms         map[Arm]PolicyArm     `json:"arms"`
-	Changes      []AllowedChange       `json:"allowed_changes"`
-	GoldenIDs    []string              `json:"required_golden_task_ids"`
-	GoldenRule   string                `json:"golden_rule"`
-	FamilyRule   string                `json:"family_rule"`
-	Requirements Requirements          `json:"requirements"`
+	CollectionProfile string                `json:"collection_profile,omitempty"`
+	Kind              string                `json:"kind"`
+	Version           string                `json:"version"`
+	Digest            models.EvidenceDigest `json:"digest"`
+	Design            Design                `json:"design"`
+	Arms              map[Arm]PolicyArm     `json:"arms"`
+	Changes           []AllowedChange       `json:"allowed_changes"`
+	GoldenIDs         []string              `json:"required_golden_task_ids"`
+	GoldenRule        string                `json:"golden_rule"`
+	FamilyRule        string                `json:"family_rule"`
+	Requirements      Requirements          `json:"requirements"`
 }
 
 type SampleKey struct {

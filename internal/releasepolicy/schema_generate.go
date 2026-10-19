@@ -8,12 +8,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
 
+	"github.com/microsoft/waza/internal/controlledcomparison"
+	"github.com/microsoft/waza/internal/nativetask"
 	"github.com/microsoft/waza/internal/releasepolicy"
 	"github.com/microsoft/waza/internal/webapi"
 )
@@ -50,7 +53,8 @@ func (g *generator) schema(typ reflect.Type) document {
 			g.definitions[name] = document{"type": "object", "additionalProperties": false,
 				"properties": properties, "required": required}
 		}
-		return document{"$ref": "#/$defs/" + name}
+		pointer := strings.NewReplacer("~", "~0", "/", "~1").Replace(name)
+		return document{"$ref": "#/$defs/" + url.PathEscape(pointer)}
 	case reflect.Slice, reflect.Array:
 		if typ.Elem().Kind() == reflect.Uint8 {
 			return document{"type": []string{"string", "null"}, "contentEncoding": "base64"}
@@ -123,6 +127,7 @@ func main() {
 		typ        reflect.Type
 	}{
 		{"release-policy", releasepolicy.PolicyKind, reflect.TypeFor[releasepolicy.Policy]()},
+		{"release-native-policy", controlledcomparison.NativePolicyKind, reflect.TypeFor[controlledcomparison.NativePolicy]()},
 		{"release-resolved-plan", releasepolicy.PlanKind, reflect.TypeFor[releasepolicy.ResolvedPlan]()},
 		{"release-receipt", releasepolicy.ReceiptKind, reflect.TypeFor[releasepolicy.Receipt]()},
 		{"release-journal", releasepolicy.JournalKind, reflect.TypeFor[releasepolicy.Journal]()},
@@ -138,10 +143,18 @@ func main() {
 		properties["kind"], properties["version"] = document{"const": root.kind}, document{"const": releasepolicy.Version}
 	}
 	policy := g.definitions["releasepolicy_Policy"].(document)["properties"].(document)
+	policy["collection_profile"] = document{"const": releasepolicy.NativeCollectionProfile}
 	policy["arms"] = document{"type": "object", "required": []string{"baseline", "candidate"},
 		"additionalProperties": false, "properties": document{
 			"baseline":  g.schema(reflect.TypeFor[releasepolicy.PolicyArm]()),
 			"candidate": g.schema(reflect.TypeFor[releasepolicy.PolicyArm]())}}
+	nativePolicy := g.definitions["controlledcomparison_NativePolicy"].(document)["properties"].(document)
+	nativePolicy["policy"] = g.schema(reflect.TypeFor[releasepolicy.Policy]())
+	nativePolicy["profile"] = g.schema(reflect.TypeFor[nativetask.Profile]())
+	profile := g.definitions["nativetask_Profile"].(document)["properties"].(document)
+	profile["kind"], profile["version"] = document{"const": "waza.release-native-task-profile"}, document{"const": "2.0"}
+	selection := g.definitions["nativetask_Selection"].(document)["properties"].(document)
+	selection["operation"], selection["version"] = document{"const": "native_text_task"}, document{"const": "2.0"}
 	alternatives := []document{}
 	for _, root := range roots {
 		alternatives = append(alternatives, document{"$ref": "#/$defs/" + filepath.Base(root.typ.PkgPath()) + "_" + root.typ.Name()})

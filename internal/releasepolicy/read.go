@@ -39,12 +39,25 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (Decision, erro
 	if err := ctx.Err(); err != nil {
 		return InitialDecision(), err
 	}
+
 	if runtime.GOOS == "js" || runtime.GOOS == "plan9" {
 		return InitialDecision(), fmt.Errorf("retained release collection confinement is unsupported on %s", runtime.GOOS)
 	}
 	return readDecision(ctx, func(name string) ([]byte, error) {
 		return readArtifactRootContext(ctx, root, name)
 	}, nil)
+}
+
+// ReadCoreDecisionRootContext verifies the unchanged core artifacts underneath
+// a separately versioned envelope. The envelope owner must verify its stronger
+// evidence contract before publishing this decision.
+func ReadCoreDecisionRootContext(ctx context.Context, root *os.Root) (Decision, error) {
+	return readDecisionProfile(ctx, func(name string) ([]byte, error) {
+		if name == "policy.json" {
+			name = "core-policy.json"
+		}
+		return readArtifactRootContext(ctx, root, name)
+	}, nil, true)
 }
 
 func readOwnedDecision(ctx context.Context, directory string, selected *models.EvidenceDigest) (d Decision, err error) {
@@ -75,6 +88,12 @@ func finishOwnedDecision(ctx context.Context, d *Decision, err *error, closeRoot
 type artifactReader func(string) ([]byte, error)
 
 func readDecision(ctx context.Context, read artifactReader, selected *models.EvidenceDigest) (Decision, error) {
+	return readDecisionProfile(ctx, read, selected, false)
+}
+
+const NativeCollectionProfile = "copilot_sdk_single_turn_text_v1"
+
+func readDecisionProfile(ctx context.Context, read artifactReader, selected *models.EvidenceDigest, native bool) (Decision, error) {
 	d := InitialDecision()
 	data, err := read("policy.json")
 	if err != nil {
@@ -86,6 +105,10 @@ func readDecision(ctx context.Context, read artifactReader, selected *models.Evi
 		d.Compatibility.State = "invalid"
 		d.Compatibility.Reasons = append(d.Compatibility.Reasons, err.Error())
 		return d, err
+	}
+	if (p.CollectionProfile == NativeCollectionProfile) != native {
+		d.Compatibility.State = "invalid"
+		return d, fmt.Errorf("collection profile requires its native evidence reader and envelope")
 	}
 	if selected != nil && p.Digest != *selected {
 		d.Compatibility.State = "mismatched"

@@ -40,10 +40,11 @@ type requestIntent struct {
 }
 
 type preparedData struct {
-	Arm     releasepolicy.Arm
-	TaskID  string
-	Request requestIntent
-	Sources []sourceBytes
+	Arm               releasepolicy.Arm
+	TaskID            string
+	Request           requestIntent
+	Sources           []sourceBytes
+	CollectionVersion string `json:",omitempty"`
 }
 
 type Prepared struct {
@@ -223,6 +224,93 @@ func (p *Prepared) view() (*preparedData, error) {
 
 func (p *Prepared) RequestDigest() models.EvidenceDigest { return p.requestDigest }
 
+const (
+	collectionSourceBytes   = 256 << 20
+	collectionEncodedBytes  = 128 << 20
+	collectionSourceEntries = 16384
+	collectionPathBytes     = 4096
+)
+
+// PrepareCaptured binds a retained inventory's exact source digests without
+// duplicating executable/source bytes per attempt. The collection capture owns
+// those bytes; MatchCollectionSnapshot independently rechecks every one.
+func PrepareCaptured(ctx context.Context, arm releasepolicy.Arm, taskID string, req *execution.ExecutionRequest, sources []CapturedSource) (*Prepared, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if (arm != releasepolicy.Baseline && arm != releasepolicy.Candidate) || taskID == "" {
+		return nil, fmt.Errorf("native preparation requires arm and task")
+	}
+	intent, total, err := collectionRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	data := preparedData{Arm: arm, TaskID: taskID, Request: intent, Sources: []sourceBytes{}, CollectionVersion: "2.0"}
+	if len(sources) == 0 || len(sources) > collectionSourceEntries {
+		return nil, fmt.Errorf("native collection requires a bounded nonempty source inventory")
+	}
+	last := ""
+	for _, source := range sources {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if source.Path <= last || len(source.Path) > collectionPathBytes || len(source.Bytes) > 128<<20 || !filepath.IsLocal(source.Path) ||
+			filepath.ToSlash(filepath.Clean(source.Path)) != source.Path || strings.Contains(source.Path, "\\") ||
+			source.Digest != releasepolicy.SourceDigest([]byte(source.Bytes)) {
+			return nil, fmt.Errorf("invalid retained native source inventory")
+		}
+		if len(source.Bytes) > collectionSourceBytes-total {
+			return nil, fmt.Errorf("native inputs exceed bounded inventory")
+		}
+		total += len(source.Bytes)
+		data.Sources = append(data.Sources, sourceBytes{Path: source.Path, Digest: source.Digest})
+		last = source.Path
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	if len(payload) > collectionEncodedBytes {
+		return nil, fmt.Errorf("native encoded inventory exceeds bounded input")
+	}
+	seal, err := evidence.JSONDigest(data)
+	if err != nil {
+		return nil, err
+	}
+	requestDigest, err := evidence.JSONDigest(intent)
+	if err != nil {
+		return nil, err
+	}
+	return &Prepared{payload, *seal, *requestDigest}, nil
+}
+
+func CollectionRequestDigest(req *execution.ExecutionRequest) (models.EvidenceDigest, error) {
+	intent, _, err := collectionRequest(req)
+	if err != nil {
+		return models.EvidenceDigest{}, err
+	}
+	digest, err := evidence.JSONDigest(intent)
+	if err != nil {
+		return models.EvidenceDigest{}, err
+	}
+	return *digest, nil
+}
+
+func collectionRequest(req *execution.ExecutionRequest) (requestIntent, int, error) {
+	intent, total, err := projectRequest(req)
+	if err != nil {
+		return intent, 0, err
+	}
+	raw, err := json.Marshal(intent)
+	if err != nil {
+		return intent, 0, err
+	}
+	if len(raw) > 16<<20 {
+		return intent, 0, fmt.Errorf("native collection request exceeds 16 MiB")
+	}
+	return intent, total, nil
+}
+
 // Admit checks internal linkage only, not current policy allocation or sources.
 func Admit(ctx context.Context, p *Prepared, profile *Profile, key releasepolicy.AttemptKey) (*Admitted, error) {
 	if err := ctx.Err(); err != nil {
@@ -243,6 +331,9 @@ func Admit(ctx context.Context, p *Prepared, profile *Profile, key releasepolicy
 	checked, err := DecodeProfile(raw)
 	if err != nil {
 		return nil, err
+	}
+	if (data.CollectionVersion == "2.0") != (checked.Version == "2.0") {
+		return nil, fmt.Errorf("native preparation/profile versions differ")
 	}
 	arm := checked.Arms[key.Arm]
 	found := false
@@ -299,7 +390,7 @@ func DecodeProfile(raw []byte) (*Profile, error) {
 	digest, err := evidence.JSONDigest(object)
 	nonce, nonceErr := hex.DecodeString(p.Nonce)
 	if err != nil || digest == nil || *digest != p.Digest || !validDigest(p.Digest, "json-v1") ||
-		p.Kind != profileKind || p.Version != version || p.Selection != (Selection{"native_text_task", version}) ||
+		p.Kind != profileKind || (p.Version != version && p.Version != "2.0") || p.Selection != (Selection{"native_text_task", p.Version}) ||
 		p.PermissionMode != "deny_all" || !validDigest(p.PolicyDigest, "json-v1") ||
 		nonceErr != nil || len(nonce) != 32 || p.Nonce != strings.ToLower(p.Nonce) || len(p.Arms) != 2 {
 		return nil, fmt.Errorf("native profile selection or independent identity is invalid")

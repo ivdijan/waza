@@ -171,6 +171,8 @@ type CopilotEngineBuilder struct {
 
 type CopilotEngineBuilderOptions struct {
 	NewCopilotClient func(clientOptions *copilot.ClientOptions) CopilotClient
+	// OwnClient selects a fresh production client instead of SharedClient.
+	OwnClient bool
 	// DiagnosticObserver enables sanitized, failure-retaining lifecycle diagnostics.
 	// Calls are serialized outside engine state locks. Observers must not reenter
 	// engine lifecycle methods (including Execute, Initialize, DeleteSession, Shutdown).
@@ -181,21 +183,30 @@ type CopilotEngineBuilderOptions struct {
 //   - defaultModelID - used if no model ID is specified in session creation. Can be blank, which means the copilot
 //     CLI will choose its own fallback model.
 //
-// When `options.NewCopilotClient` is nil (the production path), the engine is
+// Unless OwnClient is selected, when `options.NewCopilotClient` is nil the engine is
 // wired to the process-wide shared client returned by [SharedClient]. The
 // caller MUST invoke [ShutdownSharedClient] once at the top level after every
 // engine has been Shutdown — engines built on top of the shared client will
 // not stop it themselves. See docs/design/135-improve-concurrency.md (R2).
 //
-// When a `NewCopilotClient` factory is provided (test path), the engine
-// constructs its own client and stops it during Shutdown as before.
+// OwnClient resolves the same explicit/embedded CLI options for a fresh
+// production client. A supplied NewCopilotClient factory also selects ownership.
+// Both owned paths stop their client during Shutdown.
 func NewCopilotEngineBuilder(defaultModelID string, options *CopilotEngineBuilderOptions) *CopilotEngineBuilder {
 	var client CopilotClient
 	ownsClient := false
 	provider := providerFromEnv()
 	cliArgs := modelCLIArgs()
 
-	if options == nil || options.NewCopilotClient == nil {
+	if options != nil && options.OwnClient && options.NewCopilotClient == nil {
+		clientOptions, err := sharedClientOptions("error", cliArgs)
+		if err != nil {
+			client = &startupErrorClient{err: err}
+		} else {
+			client = newCopilotClient(clientOptions)
+		}
+		ownsClient = true
+	} else if options == nil || options.NewCopilotClient == nil {
 		// Production: share one SDK process across all engines + graders.
 		client = SharedClient(SharedClientOptions{CLIArgs: cliArgs})
 	} else {

@@ -102,6 +102,9 @@ func DecodePolicy(data []byte) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
+	if profile, present := object["collection_profile"]; present && profile != NativeCollectionProfile {
+		return nil, fmt.Errorf("unsupported explicit collection profile")
+	}
 	// Verify the original numeric-token projection, not a float64 re-encoding.
 	arms, ok := object["arms"].(map[string]any)
 	if !ok {
@@ -176,6 +179,9 @@ func ValidatePolicy(p *Policy) error {
 		p.GoldenRule != "both_arms_first_attempt_pass" ||
 		p.FamilyRule != "single_contrast_external_family_bound" {
 		return fmt.Errorf("unsupported policy contract")
+	}
+	if p.CollectionProfile != "" && p.CollectionProfile != NativeCollectionProfile {
+		return fmt.Errorf("unsupported collection profile")
 	}
 	d := p.Design
 	if d.Estimand != "fixed_suite_repeated_execution" ||

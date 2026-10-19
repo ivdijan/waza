@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/microsoft/waza/internal/controlledcomparison"
 	"github.com/microsoft/waza/internal/releasepolicy"
 )
 
@@ -20,12 +22,7 @@ func runControlledAssessment(out io.Writer, policyPath, directory, format string
 		if err != nil {
 			assessmentError = fmt.Errorf("reading selected release policy: %w", err)
 		} else {
-			selected, err := releasepolicy.DecodePolicy(data)
-			if err != nil {
-				assessmentError = err
-			} else {
-				d, assessmentError = releasepolicy.ReadSelectedDecision(directory, selected.Digest)
-			}
+			d, assessmentError = controlledcomparison.ReadSelectedDecision(context.Background(), directory, data)
 		}
 	}
 	if assessmentError != nil {
@@ -89,6 +86,20 @@ func renderControlledDecision(out io.Writer, d releasepolicy.Decision, format st
 	if d.Estimate != nil {
 		fmt.Fprintf(&report, "Fixed-suite paired estimate %.6g, interval [%.6g, %.6g], half-width %.6g; %d planned clusters (not iid retries)\n",
 			*d.Estimate, *d.Lower, *d.Upper, *d.HalfWidth, d.PlannedClusters)
+	}
+	if d.Native != nil {
+		fmt.Fprintf(&report, "Native profile: %s %s; client tools: %s\n", d.Native.Profile, d.Native.Version, d.Native.ClientToolPolicy)
+		fmt.Fprintf(&report, "Native capabilities: runtime version %s; provider currency %s; assurance %s\n",
+			d.Native.RuntimeVersion, d.Native.ProviderCurrency, d.Native.Assurance)
+		fmt.Fprintf(&report, "Native budget contract: %s (not a hard spending cap)\n", d.Native.BudgetContract)
+		for _, attempt := range d.Native.Attempts {
+			fmt.Fprintf(&report, "Native %s/%s trial %d attempt %d: %s/%s; output %s; final usage complete %t\n",
+				attempt.Key.Arm, attempt.Key.TaskID, attempt.Key.Trial, attempt.Key.Attempt,
+				attempt.Category, attempt.Status, attempt.OutputAvailability, attempt.UsageComplete)
+			if attempt.Error != "" {
+				fmt.Fprintf(&report, "  %s\n", attempt.Error)
+			}
+		}
 	}
 	for _, limitation := range d.Limitations {
 		fmt.Fprintf(&report, "Limitation: %s\n", limitation)

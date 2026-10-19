@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -10,8 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/microsoft/waza/internal/controlledcomparison"
+	"github.com/microsoft/waza/internal/releasepolicy"
 	"github.com/microsoft/waza/internal/testutil"
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
 )
 
 func TestControlledCLIWorkflow(t *testing.T) {
@@ -67,7 +71,61 @@ func TestControlledCLIRequiredBoundaries(t *testing.T) {
 		if err := cmd.Execute(); !errors.As(err, &exit) || exit.Code != 1 {
 			t.Fatalf("missing explicit inputs did not reject: %v", err)
 		}
+
 	}
+	t.Run("native explicit selection", func(t *testing.T) {
+		if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+			t.Skip("native durable planning requires Linux or macOS")
+		}
+		directory := t.TempDir()
+		write := func(name, value string) string {
+			t.Helper()
+			path := filepath.Join(directory, name)
+			require.NoError(t, os.WriteFile(path, []byte(value), 0o600))
+			return path
+		}
+		eval := write("eval.yaml", "schemaVersion: '1.0'\nname: native\nconfig:\n  executor: copilot-sdk\n  model: fixed-model\n  disabled_skills: ['*']\n  trials_per_task: 1\n  timeout_seconds: 30\ntasks: [task.yaml]\ngraders:\n  - name: text\n    type: text\n    config:\n      contains: [hello]\n")
+		write("task.yaml", "id: task\nname: native\ngolden: true\ninputs:\n  prompt: hello\n")
+		rawDesign, err := json.Marshal(releasepolicy.Design{
+			Estimand: "fixed_suite_repeated_execution", Endpoint: "first_attempt_pass", Alpha: "0.05",
+			FamilySize: 1, MaximumHalfWidth: "1", Margin: "1", Accept: "noninferiority",
+			Independence: releasepolicy.Independence{Assessment: "unjustified", Justification: "Synthetic CLI contract test.",
+				Limitations: []string{"Not live quality evidence."}},
+			Clusters: []releasepolicy.Cluster{{ID: "cluster", Weight: "1", Tasks: []releasepolicy.PlannedTask{
+				{ID: "task", Weight: "1", TrialOrdinals: []int{1}}}}},
+		})
+		require.NoError(t, err)
+		design := write("design.json", string(rawDesign))
+		// Reuse the canonical input serializer rather than inventing requirement
+		// field names or defaults in a CLI-only fixture.
+		requirements := releasepolicy.Requirements{IdentityDomains: []string{"task_definition", "resolved_prompt", "fixture_inventory",
+			"instruction_inventory", "grader_configuration", "dependency_mode", "grader_implementation", "rubric_inventory", "lock_inventory"},
+			Billing: []releasepolicy.BillingRequirement{}}
+		raw, err := json.Marshal(requirements)
+		require.NoError(t, err)
+		required := write("requirements.json", string(raw))
+		policy := filepath.Join(directory, "policy.json")
+		plan := newComparePlanCommand()
+		plan.SetOut(io.Discard)
+		plan.SetErr(io.Discard)
+		plan.SetArgs([]string{"--collector", "native-copilot", "--baseline-eval", eval, "--candidate-eval", eval,
+			"--design", design, "--requirements", required, "--output", policy})
+		require.NoError(t, plan.Execute())
+		raw, err = os.ReadFile(policy)
+		require.NoError(t, err)
+		_, _, _, err = controlledcomparison.DecodeNativePolicy(raw)
+		require.NoError(t, err)
+		for _, extra := range [][]string{nil, {"--collector", "mock"}, {"--collector", "unknown"}, {"--collector", "native-copilot", "--assurance-contract", "not-loaded.json"}} {
+			collection := filepath.Join(t.TempDir(), "must-not-exist")
+			command := newCompareCollectCommand()
+			command.SetOut(io.Discard)
+			command.SetErr(io.Discard)
+			args := []string{"--release-policy", policy, "--baseline-eval", eval, "--candidate-eval", eval, "--collection-dir", collection}
+			command.SetArgs(append(args, extra...))
+			require.Error(t, command.Execute())
+			require.NoDirExists(t, collection, "wrong/default collector or supplied assurance cannot enter paid native execution")
+		}
+	})
 	for _, args := range [][]string{{"compare-plan"}, {"compare-collect"}, {"compare", "--release-policy=policy"},
 		{"gate", "--release-policy=policy"}, {"compare", "--collection-dir=collection"},
 		{"gate", "--collection-dir=collection"}, {"compare", "--collection-dir="}, {"gate", "--collection-dir="}} {

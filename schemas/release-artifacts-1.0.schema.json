@@ -1,5 +1,37 @@
 {
   "$defs": {
+    "controlledcomparison_NativePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        },
+        "digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        },
+        "kind": {
+          "const": "waza.release-native-policy"
+        },
+        "policy": {
+          "$ref": "#/$defs/releasepolicy_Policy"
+        },
+        "profile": {
+          "$ref": "#/$defs/nativetask_Profile"
+        },
+        "version": {
+          "const": "1.0"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "digest",
+        "policy",
+        "profile",
+        "capture_digest"
+      ],
+      "type": "object"
+    },
     "models_CheckExplanation": {
       "additionalProperties": false,
       "properties": {
@@ -86,8 +118,27 @@
       },
       "required": [
         "command",
-        "exit_code",
         "response_index"
+      ],
+      "type": "object"
+    },
+    "models_DependencyMode": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "mode"
       ],
       "type": "object"
     },
@@ -463,6 +514,241 @@
       ],
       "type": "object"
     },
+    "models_JudgeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "boundary": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/models_EvidenceDiagnostic"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "execution_mode": {
+          "type": "string"
+        },
+        "files": {
+          "$ref": "#/$defs/models_JudgeEvidenceSection%5B%5B%5Dgithub.com~1microsoft~1waza~1internal~1models.JudgeEvidenceFile%5D"
+        },
+        "limits": {
+          "$ref": "#/$defs/models_JudgeEvidenceLimits"
+        },
+        "messages": {
+          "$ref": "#/$defs/models_JudgeEvidenceSection%5B%5B%5Dgithub.com~1microsoft~1waza~1internal~1models.JudgeEvidenceMessage%5D"
+        },
+        "origin": {
+          "$ref": "#/$defs/models_EvidenceOrigin"
+        },
+        "output": {
+          "$ref": "#/$defs/models_JudgeEvidenceSection%5Bstring%5D"
+        },
+        "redaction": {
+          "$ref": "#/$defs/models_EvidenceRedaction"
+        },
+        "selection": {
+          "$ref": "#/$defs/models_PromptEvidenceContext"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "task": {
+          "$ref": "#/$defs/models_JudgeEvidenceSection%5Bstring%5D"
+        },
+        "tool_events": {
+          "$ref": "#/$defs/models_JudgeEvidenceSection%5B%5B%5Dgithub.com~1microsoft~1waza~1internal~1models.ToolEvent%5D"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "sha256",
+        "origin",
+        "boundary",
+        "execution_mode",
+        "task",
+        "output",
+        "messages",
+        "tool_events",
+        "files",
+        "selection",
+        "redaction",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceFile": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_bundle_bytes": {
+          "type": "integer"
+        },
+        "max_file_bytes": {
+          "type": "integer"
+        },
+        "max_files": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_files",
+        "max_file_bytes",
+        "max_bundle_bytes"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceSection[[]github.com/microsoft/waza/internal/models.JudgeEvidenceFile]": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "type": "string"
+        },
+        "completeness": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/models_JudgeEvidenceFile"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availability",
+        "completeness",
+        "items"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceSection[[]github.com/microsoft/waza/internal/models.JudgeEvidenceMessage]": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "type": "string"
+        },
+        "completeness": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/models_JudgeEvidenceMessage"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availability",
+        "completeness",
+        "items"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceSection[[]github.com/microsoft/waza/internal/models.ToolEvent]": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "type": "string"
+        },
+        "completeness": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/models_ToolEvent"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availability",
+        "completeness",
+        "items"
+      ],
+      "type": "object"
+    },
+    "models_JudgeEvidenceSection[string]": {
+      "additionalProperties": false,
+      "properties": {
+        "availability": {
+          "type": "string"
+        },
+        "completeness": {
+          "type": "string"
+        },
+        "items": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availability",
+        "completeness",
+        "items"
+      ],
+      "type": "object"
+    },
     "models_ModelUsage": {
       "additionalProperties": false,
       "properties": {
@@ -495,6 +781,95 @@
         "cache_write_tokens",
         "request_count",
         "request_cost"
+      ],
+      "type": "object"
+    },
+    "models_PromptEvidenceContext": {
+      "additionalProperties": false,
+      "properties": {
+        "evaluator_only": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "files": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "models_PromptJudgeObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle_sha256": {
+          "type": "string"
+        },
+        "context": {
+          "type": "string"
+        },
+        "delivery_sha256": {
+          "type": "string"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/models_EvidenceDiagnostic"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "duration_ms": {
+          "type": "integer"
+        },
+        "evidence_context": {
+          "$ref": "#/$defs/models_PromptEvidenceContext"
+        },
+        "grader": {
+          "type": "string"
+        },
+        "inspection": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "submission_observed": {
+          "type": "boolean"
+        },
+        "usage": {
+          "$ref": "#/$defs/models_UsageStats"
+        }
+      },
+      "required": [
+        "grader",
+        "context",
+        "state",
+        "submission_observed",
+        "inspection",
+        "evidence_context",
+        "purpose",
+        "duration_ms"
       ],
       "type": "object"
     },
@@ -586,6 +961,15 @@
             "null"
           ]
         },
+        "dependency_modes": {
+          "items": {
+            "$ref": "#/$defs/models_DependencyMode"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "duration_ms": {
           "type": "integer"
         },
@@ -610,8 +994,20 @@
             "null"
           ]
         },
+        "judge_evidence": {
+          "$ref": "#/$defs/models_JudgeEvidence"
+        },
         "prompt": {
           "type": "string"
+        },
+        "prompt_judging": {
+          "items": {
+            "$ref": "#/$defs/models_PromptJudgeObservation"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "requirement_explanations": {
           "items": {
@@ -929,6 +1325,106 @@
       ],
       "type": "object"
     },
+    "nativetask_ArmPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/nativetask_RequestPlan"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "resolved_plan_digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        }
+      },
+      "required": [
+        "resolved_plan_digest",
+        "requests"
+      ],
+      "type": "object"
+    },
+    "nativetask_Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "arms": {
+          "additionalProperties": {
+            "$ref": "#/$defs/nativetask_ArmPlan"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        },
+        "kind": {
+          "const": "waza.release-native-task-profile"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "permission_mode": {
+          "type": "string"
+        },
+        "policy_digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        },
+        "selection": {
+          "$ref": "#/$defs/nativetask_Selection"
+        },
+        "version": {
+          "const": "2.0"
+        }
+      },
+      "required": [
+        "kind",
+        "version",
+        "digest",
+        "nonce",
+        "selection",
+        "policy_digest",
+        "permission_mode",
+        "arms"
+      ],
+      "type": "object"
+    },
+    "nativetask_RequestPlan": {
+      "additionalProperties": false,
+      "properties": {
+        "request_digest": {
+          "$ref": "#/$defs/models_EvidenceDigest"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "request_digest"
+      ],
+      "type": "object"
+    },
+    "nativetask_Selection": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "const": "native_text_task"
+        },
+        "version": {
+          "const": "2.0"
+        }
+      },
+      "required": [
+        "operation",
+        "version"
+      ],
+      "type": "object"
+    },
     "releasepolicy_ActualRunRow": {
       "additionalProperties": false,
       "properties": {
@@ -1233,6 +1729,9 @@
         "lower": {
           "type": "number"
         },
+        "native": {
+          "$ref": "#/$defs/releasepolicy_NativeDecision"
+        },
         "operations": {
           "$ref": "#/$defs/releasepolicy_Dimension"
         },
@@ -1534,6 +2033,132 @@
       ],
       "type": "object"
     },
+    "releasepolicy_NativeAttemptView": {
+      "additionalProperties": false,
+      "properties": {
+        "accounting_models": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "event_models": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "key": {
+          "$ref": "#/$defs/releasepolicy_AttemptKey"
+        },
+        "lifecycle": {
+          "additionalProperties": {
+            "$ref": "#/$defs/releasepolicy_NativePhaseView"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "output": {
+          "type": "string"
+        },
+        "output_availability": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "usage_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "status",
+        "category",
+        "error",
+        "output_availability",
+        "event_models",
+        "accounting_models",
+        "usage_complete",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "releasepolicy_NativeDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "assurance": {
+          "type": "string"
+        },
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/releasepolicy_NativeAttemptView"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "budget_contract": {
+          "type": "string"
+        },
+        "client_tool_policy": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        },
+        "provider_currency": {
+          "type": "string"
+        },
+        "runtime_version": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile",
+        "version",
+        "attempts",
+        "runtime_version",
+        "provider_currency",
+        "assurance",
+        "client_tool_policy",
+        "budget_contract"
+      ],
+      "type": "object"
+    },
+    "releasepolicy_NativePhaseView": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
     "releasepolicy_PlannedTask": {
       "additionalProperties": false,
       "properties": {
@@ -1587,6 +2212,9 @@
             "candidate"
           ],
           "type": "object"
+        },
+        "collection_profile": {
+          "const": "copilot_sdk_single_turn_text_v1"
         },
         "design": {
           "$ref": "#/$defs/releasepolicy_Design"
@@ -2495,6 +3123,9 @@
         "lower": {
           "type": "number"
         },
+        "native": {
+          "$ref": "#/$defs/releasepolicy_NativeDecision"
+        },
         "operations": {
           "$ref": "#/$defs/releasepolicy_Dimension"
         },
@@ -2580,6 +3211,9 @@
   "oneOf": [
     {
       "$ref": "#/$defs/releasepolicy_Policy"
+    },
+    {
+      "$ref": "#/$defs/controlledcomparison_NativePolicy"
     },
     {
       "$ref": "#/$defs/releasepolicy_ResolvedPlan"

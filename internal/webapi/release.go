@@ -10,6 +10,7 @@ import (
 	"path"
 	"runtime"
 
+	"github.com/microsoft/waza/internal/controlledcomparison"
 	"github.com/microsoft/waza/internal/releasepolicy"
 )
 
@@ -127,7 +128,7 @@ func readReleaseCollection(ctx context.Context, collection *os.Root, relative st
 			return ReleaseCollection{}, fmt.Errorf("release collection artifact is a symlink: %s", name)
 		}
 	}
-	decision, readErr := releasepolicy.ReadDecisionRootContext(ctx, collection)
+	decision, readErr := controlledcomparison.ReadDecisionRootContext(ctx, collection)
 	item := ReleaseCollection{Path: relative, Decision: releaseView(decision)}
 	if readErr != nil {
 		item.Decision.Accepted = false

@@ -28,6 +28,16 @@ type CapturedSource struct {
 // MatchSnapshot only compares retained inputs. It performs no source reads,
 // preparation, admission, execution, policy allocation or producer acceptance.
 func MatchSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasepolicy.AttemptKey, req *execution.ExecutionRequest, sources []CapturedSource) error {
+	return matchSnapshot(ctx, admitted, expectedKey, req, sources, false)
+}
+
+// MatchCollectionSnapshot admits the separately selected 2.0 collection
+// inventory budget, including the retained evaluator executable.
+func MatchCollectionSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasepolicy.AttemptKey, req *execution.ExecutionRequest, sources []CapturedSource) error {
+	return matchSnapshot(ctx, admitted, expectedKey, req, sources, true)
+}
+
+func matchSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasepolicy.AttemptKey, req *execution.ExecutionRequest, sources []CapturedSource, collection bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -38,6 +48,15 @@ func MatchSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasep
 	data, err := admitted.prepared.view()
 	if err != nil {
 		return err
+	}
+	limit, encodedLimit := assurance.MaxLabelBytes, assurance.MaxLabelBytes
+	if collection {
+		if data.CollectionVersion != "2.0" {
+			return fmt.Errorf("native collection requires separately selected preparation")
+		}
+		limit, encodedLimit = collectionSourceBytes, collectionEncodedBytes
+	} else if data.CollectionVersion != "" {
+		return fmt.Errorf("primitive snapshot does not admit collection preparation")
 	}
 	if (expectedKey.Arm != releasepolicy.Baseline && expectedKey.Arm != releasepolicy.Candidate) ||
 		expectedKey.EvalID == "" || expectedKey.TaskID == "" || expectedKey.ClusterID == "" ||
@@ -80,24 +99,25 @@ func MatchSnapshot(ctx context.Context, admitted *Admitted, expectedKey releasep
 			strings.Contains(source.Path, "\\") || filepath.ToSlash(filepath.Clean(source.Path)) != source.Path {
 			return fmt.Errorf("native snapshot sources require canonical unique ordered paths")
 		}
-		if len(source.Bytes) > assurance.MaxLabelBytes || total > assurance.MaxLabelBytes-len(source.Bytes) {
+		if len(source.Bytes) > limit || total > limit-len(source.Bytes) {
 			return fmt.Errorf("native snapshot bridge exceeds primitive bounded inventory")
 		}
 		prepared := data.Sources[i]
 		content := []byte(source.Bytes)
 		actualDigest := releasepolicy.SourceDigest(content)
 		if source.Path != prepared.Path || source.Digest != actualDigest ||
-			prepared.Digest != actualDigest || !bytes.Equal(content, prepared.Bytes) {
+			prepared.Digest != actualDigest || (!collection && !bytes.Equal(content, prepared.Bytes)) ||
+			(collection && len(prepared.Bytes) != 0) {
 			return fmt.Errorf("native snapshot source differs from preparation")
 		}
 		total += len(content)
 		last = source.Path
 	}
-	payload, err := json.Marshal(preparedData{Arm: data.Arm, TaskID: data.TaskID, Request: intent, Sources: data.Sources})
+	payload, err := json.Marshal(preparedData{Arm: data.Arm, TaskID: data.TaskID, Request: intent, Sources: data.Sources, CollectionVersion: data.CollectionVersion})
 	if err != nil {
 		return fmt.Errorf("encoding matched native inputs: %w", err)
 	}
-	if len(payload) > assurance.MaxLabelBytes || len(admitted.prepared.data) > assurance.MaxLabelBytes {
+	if len(payload) > encodedLimit || len(admitted.prepared.data) > encodedLimit {
 		return fmt.Errorf("native snapshot bridge exceeds primitive encoded inventory")
 	}
 	return ctx.Err()
