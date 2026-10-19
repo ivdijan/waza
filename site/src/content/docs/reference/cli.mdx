@@ -670,6 +670,9 @@ checkpoints, multiturn and other graders are unsupported. Usage limits use
 final observations and best-effort prestart checks, so in-flight overshoot is
 possible; they are not a hard spending cap. Runtime version, provider currency
 and ambiguous output presence remain unavailable.
+Operationally incomplete native collection exits nonzero even if core
+publication completed; inspect `native-stop.json` for the error, budget or
+currentness cause. The API collection item's `error` may coexist with attempts.
 Selected assurance additionally persists `assurance-contract.json`,
 `assurance.ndjson` actual-response rows and `assurance-ledger.json`. Sources,
 evaluator evidence and review inputs are rechecked after verification and before

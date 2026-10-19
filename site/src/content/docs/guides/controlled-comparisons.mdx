@@ -127,12 +127,29 @@ ambiguous output presence is not converted into empty output. Required
 unsupported runtime, assurance or currency evidence does not pass.
 
 The native policy is a `waza.release-native-policy` 1.0 envelope embedding the
-core policy 1.0, native task profile 2.0 and source-capture digest. The optional
-API `decision.native` view lists retained attempt lifecycle, status, output
-availability, model observations and usage completeness while explicitly
-labeling unavailable runtime/currency and unsupported assurance. Old core-only
-readers reject the envelope; ordinary mock policy and gate defaults do not
-change. See the
+core policy protocol 1.0, native task profile 2.0, source-capture digest and
+required `collection_profile: "copilot_sdk_single_turn_text_v1"` discriminator.
+Frozen core-only readers reject both the outer envelope and an extracted core
+policy with that unknown discriminator; stripping the wrapper does not make
+native policy legacy-compatible. Ordinary mock policy and gate defaults do
+not change.
+
+The public native 2.0 adapter bounds selected source files to 16 MiB each,
+evaluator inputs to 128 MiB, aggregate sources to 256 MiB and 16,384 entries,
+and the full capture wire to 512 MiB. Per-attempt digest-only descriptors are
+limited to 128 MiB, requests to 16 MiB and source paths to 4,096 bytes. Native
+tapes and record streams are limited to 16 MiB. Oversized payloads or
+aggregate tapes fail explicitly, leaving durable pending/nonpassing evidence;
+the adapter does not silently discard data or promise unbounded retention.
+These public bounds do not change existing private 1.0 bounds.
+
+Operationally incomplete native collection returns nonzero even if core
+publication completed. `native-stop.json` retains the error, budget or
+currentness cause; the API collection item's `error` may coexist with its
+attempts. The optional API `decision.native` view lists retained attempt
+lifecycle, status, output availability, model observations and usage
+completeness while labeling unavailable runtime/currency and unsupported
+assurance. See the
 [full contract](https://github.com/microsoft/waza/blob/main/docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection)
 for artifact and statistical boundaries.
 

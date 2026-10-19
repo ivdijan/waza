@@ -15,6 +15,13 @@ exit `1`), not a release claim. Serve its collection parent and open the
 **Release policies** tab to inspect separate assurance/golden/billing/statistical
 states and complete or interrupted attempt accounting.
 
+This demo stays on the default offline mock collector. A separate, explicitly
+selected native Copilot profile can incur provider usage and supports only a
+bounded fixed-model, single-turn/no-skills/text-check matrix. Do not run it as
+part of the offline demo; see the
+[native collection contract](CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection)
+for its supported scope, artifacts and limits.
+
 Before any demo, ensure waza is installed:
 
 ```bash

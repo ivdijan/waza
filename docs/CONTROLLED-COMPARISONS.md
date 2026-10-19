@@ -57,13 +57,31 @@ waza gate --release-policy native-policy.json \
 ```
 
 The selected policy is a `waza.release-native-policy` 1.0 envelope containing
-the core release policy (still version 1.0), native task profile 2.0 and a
-source-capture digest. `compare`/`gate` read the envelope only when selected
-with `--release-policy`; the legacy core-only reader rejects it. Collection
-persists `policy.json`, `core-policy.json`, `native-capture.json`, the core
-journal/receipts/results and `native/native-task-events.ndjson` plus
-`native/native-task-rows.ndjson`. It does not strip native sidecars to make a
-legacy reader accept the evidence.
+the core release policy (protocol version 1.0), native task profile 2.0 and a
+source-capture digest. The native core policy requires
+`collection_profile: "copilot_sdk_single_turn_text_v1"`. `compare`/`gate` read
+the envelope only when selected with `--release-policy`; frozen core-only
+readers reject both the outer envelope and an extracted inner core policy with
+the unknown discriminator. Removing the wrapper does not make native policy
+legacy-compatible. Collection persists `policy.json`, `core-policy.json`,
+`native-capture.json`, the core journal/receipts/results and
+`native/native-task-events.ndjson` plus `native/native-task-rows.ndjson`.
+
+The public native profile has explicit admission and persistence bounds:
+selected source files are limited to 16 MiB each, evaluator inputs to 128 MiB,
+aggregate sources to 256 MiB and 16,384 entries, and the full capture wire to
+512 MiB. Each digest-only attempt descriptor is limited to 128 MiB, its request
+to 16 MiB, and source paths to 4,096 bytes. Native tapes and record streams are
+limited to 16 MiB. Oversized payloads or aggregate tapes fail explicitly and
+leave durable pending/nonpassing evidence rather than growing without bound or
+silently dropping data. These public 2.0 adapter bounds do not change the
+existing private 1.0 bounds.
+
+An operationally incomplete native collection returns nonzero even if core
+publication completed. `native-stop.json` retains the error, budget or
+currentness cause; the API collection item's `error` may coexist with its
+attempts. Such a collection is not complete merely because core artifacts were
+published.
 
 Native durable creation is supported on Linux and macOS only. Other platforms,
 including Windows, reject before reserving collection outputs; Windows reader
