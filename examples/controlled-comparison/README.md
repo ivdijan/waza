@@ -1,6 +1,6 @@
-# Offline controlled comparison example
+# Controlled comparison example
 
-This mock/native-text example exercises base 1.0 planning and paired collection.
+This mock example exercises base 1.0 planning and paired collection.
 It intentionally stays statistically inconclusive: its single deterministic
 cluster does not establish the independence or precision needed for a release
 claim. It is not real-agent quality evidence.
@@ -8,6 +8,16 @@ claim. It is not real-agent quality evidence.
 Run the base workflow in [the controlled comparison guide](../../docs/CONTROLLED-COMPARISONS.md#offline-planning-and-collection).
 Do not overwrite an existing policy, adopt historical outcomes, or resume an
 interrupted collection.
+
+This fixture is intentionally not a native-Copilot example: its eval selects
+the mock executor. For native collection, use your own fixed-model Copilot SDK
+evals with no skills, deny-all client tools and supported text/string checks,
+then explicitly pass `--collector native-copilot` to both planning and
+collection. The native profile can incur provider usage and is not server
+isolation, runtime-version evidence or authenticated assurance. See the
+[native profile contract](../../docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection).
+Do not run native collection to reproduce this offline fixture; it is
+paid-capable and this example contains no supported live-source test suite.
 
 ## Optional independent offline assurance
 
@@ -34,13 +44,11 @@ non-assurance pass conditions are necessary. This example's statistical
 limitations cannot be erased by grader qualification.
 
 Only mock/no-skills/native-text/finite-authored-output execution is supported.
-No live SDK, calibration, paid1.1/billing support or automatic paid validation is
-selected. Required-assurance base decisions, the API and dashboard remain
+No live SDK assurance, calibration, paid1.1/billing support or automatic paid
+validation is selected. Required-assurance base decisions, the API and dashboard remain
 nonpassing; only explicitly selected outer CLI assessment can pass.
 See [the profile lifecycle, schemas and limitations](../../docs/CONTROLLED-COMPARISONS.md#independent-offline-assurance-profile).
 
-This example uses the public offline mock producer, not the internal native
-source/capture/slot/retry inspection primitives. Those establish supplied
-consistency, not witnessed execution, durability or retry permission. New
-private durable collection writers support Linux/macOS only; Windows reader
-checks do not enable this example's collection writer.
+This example uses the public offline mock producer. Native durable collection
+supports Linux/macOS only; Windows supplied-reader checks do not certify
+durable writing.

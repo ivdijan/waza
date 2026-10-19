@@ -4,12 +4,14 @@ description: Explicit fixed-design release assessment, lineage boundaries and cu
 ---
 
 Source-bound planning, paired collection, strict reassessment, structural schemas
-and a separate dashboard decision view are implemented for **offline mock,
-no-skills execution with native text/string checks**. Other strict collection
-paths are unsupported; ordinary runs retain all existing capabilities. An
-explicit independent offline assurance profile qualifies finite authored text
-cases and regrades retained actual responses without changing base 1.0.
-Mock observations validate the harness, not agent quality.
+and a separate dashboard decision view use the offline mock collector by
+default. A separately selected `native-copilot` profile supports a bounded,
+potentially paid Copilot SDK path; see
+[the native collection scope](#opt-in-to-native-copilot-collection). Other strict
+collection paths are unsupported; ordinary runs retain all existing
+capabilities. The independent offline assurance profile remains separate and
+does not change base 1.0. Mock observations validate the harness, not agent
+quality.
 
 **Upcoming/main-only:** build current source as described in
 [release availability](../../reference/releases/#upcoming-main-only-capabilities).
@@ -26,43 +28,26 @@ These observations are not strict paired-release evidence:
 | Grade with workspace or selected evidence snapshot | Supported native regrade observations and scoped explanations | Only supported checks and verified selected bytes; no inferred workspace or fresh agent run |
 
 Missing, unassessed and error states remain distinct and cannot pass by default.
-Native strict paired producer/lifecycle integration and automatic adoption of
-ordinary or historical results remain unsupported. Snapshot-only metadata cannot
-satisfy selected required release evidence. In particular, snapshot-only metadata cannot satisfy selected required evidence.
+Ordinary snapshot results and historical results are not adopted as strict
+paired evidence. Snapshot-only metadata cannot satisfy selected required
+release evidence.
 
-## Internal native groundwork is not a public producer
+## Native implementation boundaries
 
-G1 shares complete source projections; G2 reconstructs them from a distinct
-private capture and retained read associations without reopening source roots.
-Static slot joins independently check selected possible attempts. G3 inspects
-supplied retry events through the existing replay machine, preserving accepted
-starts before terminals and terminals before complete trial summaries.
+The native source projector, retained source capture, policy-slot validation
+and attempt-tape reader are implementation components used by the explicitly
+selected CLI producer. Static possible slots or caller-supplied tape joins do
+not themselves prove actual execution, durable acknowledgment, retry
+permission, currentness or release authority. A `structurally_matched` result
+describes supplied consistency only. Strict native readers reject torn or
+contradictory records rather than accepting a shorter valid prefix.
 
-Private native retry-evidence joins now connect those retained static slots,
-validated retry prefixes and supplied native event/row tapes. They match exact
-policy, source/request, collection and attempt identities and full terminal
-summaries. All actual attempts, including earlier failures and recovery, remain
-visible; unused possible retries need not execute. Joined views distinguish
-missing or clean incomplete evidence from invalid tapes. Torn native lines and
-orphan payloads return an error, not a reduced valid prefix. Unsupplied inputs
-and supplied empty tapes remain distinct.
+Native durable creation supports Linux/macOS only; Windows supplied-reader
+checks do not certify writing. Ordinary collectors, legacy decoders and default
+command behavior remain unchanged. See the
+[detailed native contract](https://github.com/microsoft/waza/blob/main/docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection).
 
-These internal primitives do not enable public native collection. Static
-possible slots are not actual starts, skips or consumed retries. Supplied-event
-consistency is not independently witnessed execution, durable acknowledgment,
-retry permission, currentness or release authority. `structurally_matched`
-describes supplied consistency, not a passing release verdict. No collector
-lifecycle, billing aggregation or public native profile is added.
-
-New private durable writers support Linux/macOS only, not Windows. Windows
-supplied-reader and fixture-byte checks do not certify durable writing.
-Missing input, empty streams, tolerated core trailing fragments and invalid
-native tapes remain distinct; no tail after collection end is accepted. Strict raw-member and
-allocation checks apply only to the selected internal inspection path; legacy
-decoders and command defaults remain unchanged. See
-[the detailed internal contract](https://github.com/microsoft/waza/blob/main/docs/CONTROLLED-COMPARISONS.md#internal-native-task-groundwork-not-an-enabled-producer).
-
-## Plan and collect offline
+## Plan and collect offline with the default mock
 
 ```bash
 waza compare-plan \
@@ -104,6 +89,53 @@ are not falsely reported as executed-input drift. No CSV/template-generated
 tasks, skills/agents, external dependencies, hooks, parallelism, multiturn,
 checkpoint or non-text graders are supported by this collection producer.
 
+## Opt in to native Copilot collection
+
+The bundled eval is a mock harness fixture, not a native-Copilot example. For
+native collection, supply your own fixed named-model evals and predeclared
+design/requirements. Explicitly select the native profile during both planning
+and collection; assessment selects the resulting envelope as usual. Do not run
+these commands as part of offline example checks; native collection may incur
+provider usage:
+
+```bash
+waza compare-plan --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --design design.json --requirements requirements.json \
+  --output native-policy.json
+waza compare-collect --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --release-policy native-policy.json --collection-dir new-native-collection
+waza gate --release-policy native-policy.json \
+  --collection-dir new-native-collection --format json
+```
+
+This source-build-only profile is limited to Copilot SDK, fixed named models,
+single turns, no skills, deny-all **client** tools and native text/string
+checks. It does not support hooks, MCP, repositories, cache, concurrency,
+resume, checkpoints, multiturn or other graders. Planning does not invoke the
+SDK; collection may incur provider usage. Native durable creation is Linux and
+macOS only and rejects other platforms before reserving outputs. Client tool
+denial is not server isolation.
+
+Observed input/output tokens and AI credits are distinct from provider
+currency. Required prior usage that is unavailable blocks further starts;
+best-effort checks run before new attempts and already-running work can
+overshoot limits asynchronously. There is no token-price conversion or hard
+spending cap. Runtime version and provider currency remain unavailable, and
+ambiguous output presence is not converted into empty output. Required
+unsupported runtime, assurance or currency evidence does not pass.
+
+The native policy is a `waza.release-native-policy` 1.0 envelope embedding the
+core policy 1.0, native task profile 2.0 and source-capture digest. The optional
+API `decision.native` view lists retained attempt lifecycle, status, output
+availability, model observations and usage completeness while explicitly
+labeling unavailable runtime/currency and unsupported assurance. Old core-only
+readers reject the envelope; ordinary mock policy and gate defaults do not
+change. See the
+[full contract](https://github.com/microsoft/waza/blob/main/docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection)
+for artifact and statistical boundaries.
+
 ## Dashboard and structural schemas
 
 Serve the local collection parent with `waza serve --results-dir <root>` and
@@ -127,6 +159,9 @@ closing the owning handles releases that pin. Retention does not promise rename
 availability on every platform. The reader explicitly rejects JavaScript/Plan 9
 pathname-backed roots.
 Windows supplied-artifact reading is not support for durable collection.
+For native policies, the returned decision may also include the optional
+`native` profile view and per-attempt lifecycle/usage fields; this does not
+upgrade unavailable runtime, currency or assurance into observed evidence.
 
 The versioned `schemas/release-*-1.0.schema.json` files provide structural
 validation. The Go reader additionally enforces exact JSON tokens, source
@@ -199,7 +234,7 @@ Every actual endpoint needs an unambiguous requirement/check mapping. Both
 arms need fresh exact offline1.0 reports, deterministic regrading of retained
 actual responses, and all base non-assurance pass conditions, including
 statistics, golden first-attempt veto, operations and any required billing
-totals. No live SDK, calibration, paid1.1/billing support or automatic paid
+totals. No live SDK assurance, calibration, paid1.1/billing support or automatic paid
 validation is supported.
 
 References remain evaluator-only and use the existing grader-reference and

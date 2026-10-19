@@ -19,8 +19,8 @@ waza gate --release-policy policy.json --collection-dir new-collection --format 
 Selected invalid, rejected, incomplete or inconclusive evidence exits `1`.
 Do not combine this mode with legacy gate policy flags or manufacture receipts
 from historical result files. Use `compare-plan` and `compare-collect` before
-assessment for the supported offline mock/native-text path. The example above
-assesses a completed collection; a mock run is not agent-quality evidence.
+assessment. They default to the supported offline mock path; a mock run is not
+agent-quality evidence.
 
 Design sampling clusters, retry policy, weights, independent-execution
 justification, endpoint, family bound and precision **before collection**.
@@ -28,6 +28,35 @@ Retries/tasks inside a cluster are not extra independent samples. Required
 golden tasks must pass their first attempt in both arms, even when retry
 recovery is the selected endpoint. Required unavailable billing or assurance
 cannot strict-pass. See [controlled comparisons](/waza/guides/controlled-comparisons/).
+
+### Explicit native Copilot collection
+
+The native SDK collector is never selected by default. Opt in on both planning
+and collection only when provider usage is intended:
+
+Do not run these native commands as part of offline example checks; collection
+may incur provider usage.
+
+```bash
+waza compare-plan --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --design design.json --requirements requirements.json \
+  --output native-policy.json
+waza compare-collect --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --release-policy native-policy.json --collection-dir new-native-collection
+waza gate --release-policy native-policy.json \
+  --collection-dir new-native-collection --format json
+```
+
+This profile supports fixed named models, one turn, no skills, deny-all client
+tools and native text/string checks only. It may incur provider usage; token
+and AI-credit limits are final-observation budgets with best-effort start
+checks, not a hard spend cap, and asynchronous overshoot is possible. Unknown
+required prior usage stops later starts. Runtime version, provider currency
+and authenticated assurance are unavailable. Native durable collection is
+supported only on Linux/macOS. Client-side tool denial is not server isolation.
+The bundled mock example is intentionally not runnable with this collector.
 
 ### Independent offline assurance in CI
 
@@ -62,7 +91,7 @@ Per-arm `--review` files and `--accept-review-source` acceptance are separate
 current inputs, not authenticated human review. Supply selected inputs at each
 stage; examples stay unreviewed and test reviews are explicitly synthetic.
 Only mock/no-skills/native-text/finite-authored-output qualification is
-supported. No live SDK, calibration, paid1.1/billing support or automatic paid
+supported. No live SDK assurance, calibration, paid1.1/billing support or automatic paid
 validation. Local hashes establish consistency, not authenticity or globally
 witnessed precommitment. See the
 [profile limits](/waza/guides/controlled-comparisons/#opt-in-separately-to-offline-assurance).

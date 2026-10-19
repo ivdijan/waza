@@ -25,8 +25,10 @@ Waza helps you:
 - **Select fixed-design release assessment explicitly** with `compare` or `gate`
   using `--release-policy` and `--collection-dir`; historical results do not
   become fresh paired evidence. Use `compare-plan` with explicit design/
-  requirements and `compare-collect` for supported offline mock/native-text
-  collection. See [the end-to-end example and limits](CONTROLLED-COMPARISONS.md).
+  requirements and `compare-collect` for the offline mock collector, or
+  explicitly select `--collector native-copilot` for the bounded,
+  potentially paid Copilot SDK profile. See
+  [the end-to-end example and limits](CONTROLLED-COMPARISONS.md).
 - **Opt in separately to offline assurance** with `compare-assurance-plan`
   and a new exclusive `--output`, then explicitly select `--assurance-contract`
   with `--release-policy` during collection and assessment. Supply current
@@ -34,8 +36,9 @@ Waza helps you:
   Only mock/no-skills/native-text finite authored cases and retained actual
   responses are supported. Both fresh offline1.0 reports, deterministic regrade
   and all base non-assurance conditions must pass; stored report labels are
-  never adopted. Unreviewed examples stay nonpassing. No calibration, paid1.1,
-  billing/live SDK support or automatic paid validation.
+  never adopted. Unreviewed examples stay nonpassing. Live SDK assurance,
+  calibration, paid1.1/billing support and automatic paid validation are not
+  supported.
   Frozen base decisions and the API/dashboard still cannot pass required
   assurance; only the explicit outer CLI decision can.
   See [the independent profile](CONTROLLED-COMPARISONS.md#independent-offline-assurance-profile)
@@ -45,14 +48,13 @@ Waza helps you:
 
 Perfect for skill authors, platform teams, and developers building AI-powered applications.
 
-The native G1 source projector, G2 root-free capture reconstruction, static
-slot joins and supplied retry-prefix/native-tape joins remain internal, not public
-collection modes. Joined views retain actual attempts and distinguish missing or
-clean incomplete evidence from invalid tapes. Retained consistency is not
-independently witnessed execution,
-durability, retry permission or release authority. New private durable writers
-support Linux/macOS only; Windows supplied-reader checks do not certify writing.
-See [the internal boundary](CONTROLLED-COMPARISONS.md#internal-native-task-groundwork-not-an-enabled-producer).
+The native source projector, root-free capture reconstruction and attempt
+inspection support the explicitly selected native collector; they are not
+independent collection modes. Retained local evidence is not independently
+witnessed execution, server isolation, authenticated assurance or release
+authority. Native durable collection is supported on Linux/macOS only; Windows
+supplied-reader checks do not certify writing. See
+[the native profile and limits](CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection).
 
 ---
 

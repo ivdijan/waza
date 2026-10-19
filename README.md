@@ -604,8 +604,15 @@ Compare results from multiple evaluation runs side by side — per-task score de
 `gate` accepts the same explicit policy selection. Its ordinary regression,
 golden, task-set defaults and `0/1/2/3` exits remain unchanged. Policy metadata in
 an ordinary results file is **not** enforcement; older executables reject the
-new flags. Use `waza compare-plan` to bind an explicit design to inspected sources
-and `waza compare-collect` for fresh paired offline mock/native-text attempts.
+new flags. Use `waza compare-plan` to bind an explicit design to inspected
+sources and `waza compare-collect` for fresh paired attempts. The default mock
+collector is offline; pass `--collector native-copilot` to both commands to
+select the supported paid-capable Copilot SDK profile. Native collection is
+limited to fixed named models, single turns, no skills, deny-all client tools
+and native text/string checks. It is not server isolation or authenticated
+assurance; runtime version, provider currency and ambiguous output presence
+remain unavailable. New durable collection is Linux/macOS-only. See
+[the native profile and limits](docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection).
 Strict reassessment rejects absent, null or case-aliased required verdict fields;
 only explicitly observed `false` and numeric zero may count as failed checks.
 Selected requirements and promoted cluster/task/trial keys also reject
@@ -642,21 +649,19 @@ Omitted timestamps remain allowed only for unreviewed/submitted declarations.
 Only mock/no-skills/native-text/finite-authored-output qualification is supported:
 both arms need fresh exact offline1.0 reports and deterministic regrading of
 retained actual responses, plus every base non-assurance pass condition.
-No live SDK, calibration, paid1.1/billing support or automatic paid validation.
+No live SDK assurance, calibration, paid1.1/billing support or automatic paid validation.
 Frozen base 1.0 policy/journal/decision and legacy defaults stay unchanged; the
 base API/dashboard remain nonpassing when assurance is required. Only explicit
 outer assessment can pass. Use JSON for machine-readable outer decisions;
 selected human output does not promise all legacy rendering layouts.
 See [profile artifacts, flags and limits](docs/CONTROLLED-COMPARISONS.md#independent-offline-assurance-profile).
 
-Internal native source projections, root-free capture reconstruction, static
-slot joins and supplied retry-prefix/native-tape joins are not public collection
-commands. Joined evidence preserves all actual attempts and distinguishes
-incomplete coverage from invalid tapes. They establish retained consistency,
-not witnessed execution,
-durability, retry permission or release authority. New private durable
-collection writers support Linux/macOS only; Windows reader checks do not
-certify durable writing. See [the internal boundaries](docs/CONTROLLED-COMPARISONS.md#internal-native-task-groundwork-not-an-enabled-producer).
+Native source projection, root-free capture reconstruction and attempt
+inspection support the explicitly selected native collector; they are not
+independent collection modes. Retained local evidence is not independently
+witnessed execution, server isolation, authenticated assurance or release
+authority. Windows supplied-reader checks do not certify durable writing. See
+[the native profile and limits](docs/CONTROLLED-COMPARISONS.md#opt-in-native-copilot-collection).
 
 ### `waza replay <snapshot.json>`
 

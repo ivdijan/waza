@@ -1,14 +1,15 @@
 # Controlled comparison contract
 
-The explicit workflow provides source-bound planning, fresh paired offline
-collection, strict artifact reassessment, structural schemas and a separate
-dashboard decision view. Affirmative collection currently supports **mock,
-no-skills execution with native text/string checks only**. General live
-engine/grader observability is not supported. An explicitly selected independent
-offline assurance profile qualifies finite authored text cases and regrades
-retained actual responses; it does not change the base 1.0 protocol.
-These contracts do not make historical outcomes strict evidence or mock
-observations agent-quality evidence.
+The explicit workflow provides source-bound planning, fresh paired collection,
+strict artifact reassessment, structural schemas and a separate dashboard
+decision view. The default collector is offline **mock**. An explicit
+`native-copilot` profile adds a bounded Copilot SDK producer for fixed named
+models, single-turn, no-skills execution with deny-all client tools and native
+text/string checks. It may incur provider usage. It is not server isolation,
+authenticated assurance or release authority. An independent offline
+assurance profile remains separately selected and does not change base 1.0.
+Historical outcomes are not fresh collection evidence; mock observations are
+not agent-quality evidence.
 
 This is upcoming/main-only behavior, not part of published standalone `v0.38.10`.
 See [source build and availability](../site/src/content/docs/reference/releases.mdx).
@@ -23,28 +24,80 @@ produce scoped result-level `evidence` and `requirement_explanations`:
 | Grade with workspace or selected evidence snapshot | Supported native regrade observations and scoped explanations | Only supported checks and verified selected bytes; no inferred workspace or fresh agent run |
 
 Missing, unassessed and error states remain distinct and cannot pass by default.
-Native strict paired producer/lifecycle integration and automatic adoption of
-ordinary or historical results remain unsupported. Selected required evidence
-must use the explicit release protocols, not snapshot-only metadata.
+Ordinary snapshot results and historical results are not adopted as strict
+paired evidence. Selected required evidence must use the explicit release
+protocols, not snapshot-only metadata.
 
-### Internal native-task groundwork (not an enabled producer)
+## Opt-in native Copilot collection
 
-`internal/nativetask` contains engine-free draft input freezing/admission,
-strict supplied-record validation and ordered local payload/terminal persistence.
-It has no CLI/profile registration, collector wiring, native-hook import or
-engine execution. Freezing a caller-supplied resolved request and rooted source
-bytes does not establish native source resolution, current policy allocation,
-authenticity or runtime readiness. Synthetic fixtures test these primitives;
-they are not live-agent or reviewed-provider evidence.
+Native collection is available only when explicitly selected for **both**
+planning and collection. It uses the Copilot SDK with one fresh client, engine,
+session and workspace per attempt. The supported matrix is intentionally
+narrow: a fixed named model, one turn, no skills, deny-all client tools, and
+native text/string checks. Hooks, MCP, repository execution, cache, parallel
+work, resume, multiturn/checkpoints, adaptive stopping, custom providers and
+other graders are not admitted. Ordinary `run` behavior is unchanged.
+
+Use your own two source evals and a predeclared design/requirements. These
+commands illustrate the explicit opt-in; the bundled offline fixture uses the
+mock executor and cannot be passed to the native collector. Do not run these
+commands as part of offline example checks; native collection may incur
+provider usage:
+
+```bash
+waza compare-plan --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --design design.json --requirements requirements.json \
+  --output native-policy.json
+waza compare-collect --collector native-copilot \
+  --baseline-eval baseline/eval.yaml --candidate-eval candidate/eval.yaml \
+  --release-policy native-policy.json --collection-dir new-native-collection
+waza gate --release-policy native-policy.json \
+  --collection-dir new-native-collection --format json
+```
+
+The selected policy is a `waza.release-native-policy` 1.0 envelope containing
+the core release policy (still version 1.0), native task profile 2.0 and a
+source-capture digest. `compare`/`gate` read the envelope only when selected
+with `--release-policy`; the legacy core-only reader rejects it. Collection
+persists `policy.json`, `core-policy.json`, `native-capture.json`, the core
+journal/receipts/results and `native/native-task-events.ndjson` plus
+`native/native-task-rows.ndjson`. It does not strip native sidecars to make a
+legacy reader accept the evidence.
+
+Native durable creation is supported on Linux and macOS only. Other platforms,
+including Windows, reject before reserving collection outputs; Windows reader
+tests do not certify native writing. Planning is offline; collection can use
+provider resources and is not covered by any assurance or billing promise.
+Use only ordinary fixed designs you have justified before collection: the
+bundled one-cluster design deliberately remains statistically inconclusive.
+
+The final usage totals are observed token and AI-credit totals, not an atomic
+spending cap. A required prior usage value that is unknown blocks further
+starts, and a reached per-arm limit prevents later starts; already-running
+requests can overshoot asynchronously. No token-price conversion or
+provider-currency inference is made. Runtime implementation/version is
+unavailable even when SDK events expose a model name; event-model and
+accounting-model observations are reported separately. Ambiguous assistant
+output is unavailable, not synthesized as empty text. Required unsupported
+assurance, runtime or provider-currency capabilities do not pass.
+
+The optional `decision.native` view exposes the profile/version, every retained
+attempt's key/status/category/error, output availability, observed event and
+accounting models, usage completeness and lifecycle phases, plus explicit
+unavailable runtime/currency and unsupported assurance labels. Local source
+hashes/currentness checks and deny-all client filtering do not prove
+independent execution, authentic provider identity, server-side isolation or
+authorization to publish a release.
 
 Canonical SDK text is usable only when **every** contributing assistant message
 has nonempty typed content and their complete concatenation matches the retained
 response. Any empty/defaulted message makes output unavailable, even with other
 nonempty messages. The SDK discards absent/null/empty wire distinctions before
 public callbacks; actual-empty support needs an upstream presence contract.
-The planned request must carry explicit nonnil deny-all policy, whose native
-SDK filter, permission guard and pre-tool guard are client restrictions, not
-server isolation.
+Every native request carries explicit nonnil deny-all policy. The SDK filter,
+permission guard and pre-tool guard are client restrictions, not server
+isolation.
 
 The legacy `RunResult.SessionDigest` is a value struct. Neutral counts and empty
 inventories in a draft row are **structural defaults, not observed session or
@@ -64,14 +117,12 @@ supplied rooted regular tape files and validating byte prefixes is separate from
 durable creation and remains available on Windows; successful parsing does not
 establish persistence acknowledgment or machine-crash durability.
 
-The separate native dependency provides an explicitly installed diagnostic
-observer, owned-client factory and independent received-model/final-usage
-observations. These hooks are not connected to controlled collection. Observer
-callbacks must not reenter engine lifecycle methods; delivery is synchronous,
-not runtime reentrancy protection. The native SDK deny-all filter, permission
-guard and pre-tool guard have offline create/resume controls, not server
-isolation or permission to execute live tasks. Exact prompt injection is
-separately opted in by a grader context and does not broaden assurance readers.
+The native collector uses an owned-client factory, diagnostic observer and
+separate received-model/final-usage observations. Observer callbacks must not
+reenter engine lifecycle methods; synchronous delivery is not runtime
+reentrancy protection. The SDK deny-all filter, permission guard and pre-tool
+guard constrain only client behavior, not server isolation. No skill or prompt
+injection is enabled by this profile.
 
 `internal/nativesnapshot` separately resolves actual two-arm source files with
 engine-free `Prepare` and independent `Recheck`, and returns detached CLIENT
@@ -94,10 +145,11 @@ parallel/dependency/hook/multiturn modes and other graders remain unsupported.
 Its private full CLIENT request projection is **not** the narrower
 `nativetask` request-intent digest or a public integration wire. Source recapture
 does not authenticate a hostile filesystem, the loaded executable, server
-isolation or exhaustive runtime instructions. No current-review authorization,
-allocation/budget admission, paired lifecycle collection or native execution is
-enabled; unsupported required runtime/routing/output-presence/currency evidence
-still cannot pass through existing protocols.
+isolation or exhaustive runtime instructions. The public producer separately
+admits fixed allocation and observed-usage start checks, and records paired
+lifecycle attempts; this resolver alone does not authorize a start. Required
+runtime, assurance, provider-currency or ambiguous-output evidence remains
+unavailable and cannot pass.
 
 The engine-free `CheckPrimitiveJoin` compares an existing internal admission to
 the resolver's retained request and complete selected-arm source inventory.
@@ -122,9 +174,10 @@ no-skills, deny-all declarations; its dependency label describes declared client
 configuration, not server isolation. Runtime implementation and model version
 remain explicitly unavailable. Independent tests compare the original mock
 planner and actual captured native request construction against every identity
-domain. These intermediate projections do not reconstruct retained source
-custody, allocate policy slots, certify retry state or enable a native collector.
-No public profile, command, schema or decision handling changes.
+domain. These intermediate projections do not by themselves reconstruct retained
+source custody, allocate policy slots or certify retry state. The public native
+profile adds a separately selected envelope and collection lifecycle; neither
+the projection nor its digest authenticates execution or provider identity.
 
 The separate private G2 capture path retains typed directory/node observations
 and ordered consumer read associations under an independent version-1 seal.
@@ -139,8 +192,8 @@ missing lookups remain explicit; they do not prove future absence or currentness
 Independent pinned original capture/constructor and discovery oracles cover this
 path, including reconstruction after roots close or disappear. New bounds apply
 only to the private selected capture path; Windows directory capture remains
-unsupported. Public collection, current-review/budget/lifecycle integration and
-provider execution remain absent.
+unsupported. The public collector uses this capture path, then performs
+separate current-source checks, budget admission and provider execution.
 
 Private `PrepareSlotSet` accepts only that distinct associated capture and
 reconstructs both full source plans and their exact golden union against the
@@ -174,8 +227,9 @@ expansion before the sealed journal's first replay. Existing noncontextual
 parsing and digest calls remain bounded calls with cancellation checks around
 them, not internally interruptible operations. Supplied event consistency is
 not independently witnessed execution, durable acknowledgment or retry
-permission. No public profile, collection lifecycle, currentness, billing
-availability or release authority is added.
+permission. This inspection helper does not add profile selection, collection
+lifecycle, billing availability or release authority; those remain separate
+from inspection of caller-supplied evidence.
 
 ### Private native retry-evidence join
 
@@ -229,11 +283,12 @@ evidence agrees. There is no pass/approval field, usage total, execution grant,
 retry permit or release decision. Sources can be closed or subsequently changed
 without altering retained consistency; callers must independently recheck
 currentness. No authentic execution, cross-file persistence acknowledgment,
-runtime version, provider currency, assurance or public native collector is
-established. Actual writer round trips are covered on Linux/macOS; portable
+runtime version, provider currency or assurance is established by this
+inspection join. The public native collector is a separate producer, not an
+execution grant from a supplied join. Actual writer round trips are covered on Linux/macOS; portable
 supplied-reader checks do not establish Windows durable creation.
 
-## Offline planning and collection
+## Default offline mock planning and collection
 
 ```bash
 waza compare-plan \
@@ -261,7 +316,9 @@ The design's allocation must be empty; planning generates its seed and arm order
 once. Planned trial counts must equal each eval's effective `trials_per_task`.
 `--allow-change model` (or `engine,reasoning_effort`) expands only actual changed
 settings to exact per-task before/after entries. Unlisted changes reject.
-Only the currently supported mock engine is admitted, regardless of allowance.
+This example selects the default mock collector. Native collection is a separate
+explicit `--collector native-copilot` profile; it does not change this
+offline-only path.
 
 `--baseline-context-dir` and `--candidate-context-dir` have the existing cwd
 semantics, defaulting to the corresponding eval directory's `fixtures`.
@@ -272,7 +329,8 @@ does not fabricate drift. CSV/templates, external dependencies, discovered
 skills/agents, hooks, parallelism, checkpoint/multiturn and non-text graders
 are explicitly unsupported by this producer, not removed from ordinary runs.
 
-Both sources are reinspected before BEGIN and every attempt. Execution consumes
+For this mock workflow, both sources are reinspected before BEGIN and every
+attempt. Execution consumes
 the private frozen input bytes, never a second mutable fixture read. Each
 durable start precedes a fresh initialized mock engine and workspace, shut down
 before terminal publication. Source inventories preserve actual resource and
@@ -310,6 +368,14 @@ payloads or recompute statistical policy from this transport.
 unavailable values remain absent, not zero. Invalid/partial publications remain
 visible with distinct reasons. This endpoint reads only the configured local
 root; remote storage remains an ordinary-results feature.
+
+When a native envelope is selected, `decision.native` is an additive optional
+view; existing mock/offline decisions keep their prior shape. It identifies
+the `copilot_sdk_single_turn_text` profile/version and reports each retained
+attempt's status, category, output availability, event/accounting model
+observations, usage completeness and lifecycle states. Runtime version and
+provider currency are explicitly unavailable, assurance is unsupported, and
+the client tool policy is labeled as distinct from server isolation.
 
 ### Independent offline assurance profile
 
@@ -384,8 +450,8 @@ explicitly synthetic and are not real review evidence.
 Verification rechecks current source bytes, evaluator evidence and review
 inputs after verification, before final publication, and again before outer
 assessment returns. Changed inputs invalidate the commitment; stored reports
-are never adopted as fresh qualification. No calibration plan, paid1.1 report,
-live SDK, provider billing support or automatic paid validation is admitted.
+are never adopted as fresh qualification. No calibration plan, paid1.1 report, live SDK assurance, provider-currency
+budgeting or automatic paid validation is admitted.
 
 | Artifact | Independent kind / version | Purpose |
 |---|---|---|
@@ -623,11 +689,13 @@ before calling it. A sidecar or transport pass boolean is never adopted.
 
 Operational rejection cannot be inferred from score or prose. Program graders
 can return nil-error process launch/timeout rejection; such paths are not
-certified behavioral evidence. Affirmative attempt observability currently
-supports only actual mock execution with ambient skills disabled and native
-builtin text/string checks, without collisions, hooks, cache, concurrency,
-repositories or multiturn dependencies. Ordinary evaluations retain every
-existing feature. Mock observations test the harness, **not agent quality**.
+certified behavioral evidence. The default offline mock path supports native
+builtin text/string checks. The explicitly selected Copilot SDK producer has
+its own narrower single-turn/no-skills/deny-all-client-tools/native-text
+profile; neither mode adds hooks, cache, concurrency, repositories or
+multiturn dependencies to controlled collection. Ordinary evaluations retain
+every existing feature. Mock observations test the harness, **not agent
+quality**.
 
 Tokens, AI credits and provider currency remain independent axes. Token values
 are exact nonnegative integer JSON tokens. Unavailable axes have no value, not

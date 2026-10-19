@@ -547,12 +547,14 @@ waza compare [results-1.json] [results-2.json] ...
 
 Selected policy assessment does not change default descriptive comparisons.
 Policy metadata in ordinary results is not enforcement, and older executables
-reject the new flags. Use `compare-plan` and `compare-collect` for the explicit
-offline mock/native-text producer; do not adopt historical outcomes.
-Internal native source/capture/slot/retry inspection does not add a public
-native producer or execution/durability/retry-permission authority. New private
-durable collection writers support Linux/macOS only; Windows reader checks
-do not certify writing.
+reject the new flags. `compare-plan` and `compare-collect` default to offline
+mock collection; explicitly pass `--collector native-copilot` to both to select
+the bounded Copilot SDK profile. It may incur provider usage and is limited to
+fixed named models, single turns, no skills, deny-all client tools and native
+text/string checks. It does not establish server isolation, authenticated
+assurance or provider/runtime versions. Native durable creation supports
+Linux/macOS only; Windows reader checks do not certify writing. Do not adopt
+historical outcomes as fresh evidence.
 See [controlled comparisons](/waza/guides/controlled-comparisons/).
 
 **Existing legacy JSON limitation:** when task sets differ, missing-task score
@@ -587,11 +589,13 @@ The section is suppressed when none of the compared files contain tool data, so 
 ## waza compare-plan
 
 Bind a mandatory fixed design and explicit requirements to inspected sources
-before collecting outcomes. Supported collection capability is offline
-mock/no-skills/native-text only; static metadata is not assurance.
+before collecting outcomes. Collection defaults to offline mock. Explicit
+`--collector native-copilot` selects the bounded Copilot SDK profile; static
+metadata is not assurance.
 
 | Flag | Description |
 |---|---|
+| `--collector` | Collection profile: `mock` (default, offline) or `native-copilot` (explicit, may incur provider usage). |
 | `--baseline-eval`, `--candidate-eval` | Required source eval YAML files. |
 | `--baseline-context-dir`, `--candidate-context-dir` | Cwd-relative context override; default is each eval directory's `fixtures`. |
 | `--design` | Required policy-1.0 design member JSON, with empty allocation; seed generated once. |
@@ -629,19 +633,23 @@ authenticated human review; test-only reviewed declarations are synthetic.
 Only mock/no-skills/native-text finite authored outputs are supported. Fresh
 exact offline1.0 reports for both arms, retained actual-response deterministic
 regrade and every base non-assurance condition are required for an outer pass.
-No live SDK, calibration, paid1.1/billing support or automatic paid validation.
+No live SDK assurance, calibration, paid1.1/billing support or automatic paid validation.
 Stored report pass labels are never adopted. The base API/dashboard intentionally
 remain nonpassing for required assurance. See the
 [independent profile lifecycle](/waza/guides/controlled-comparisons/#opt-in-separately-to-offline-assurance).
 
 ## waza compare-collect
 
-Collect fresh paired attempts under an explicit frozen policy. Sources are
-rechecked before BEGIN and every attempt; private frozen requests avoid mutable
-fixture rereads. Linux/macOS only for the new durable protocol.
+Collect fresh paired attempts under an explicit frozen policy. The default
+`mock` collector is offline. Explicitly select `--collector native-copilot` for
+the fixed-model, single-turn Copilot SDK profile, which may incur provider
+usage. Sources are rechecked before BEGIN and every attempt; private frozen
+requests avoid mutable fixture rereads. Native durable creation is Linux/macOS
+only.
 
 | Flag | Description |
 |---|---|
+| `--collector` | Collection profile: `mock` (default, offline) or `native-copilot` (explicit, may incur provider usage). |
 | `--baseline-eval`, `--candidate-eval` | Required exact source eval YAML files. |
 | `--baseline-context-dir`, `--candidate-context-dir` | Same context semantics used during planning. |
 | `--release-policy` | Required precollection policy. |
@@ -656,6 +664,12 @@ Source drift, unsupported capability, cancellation or persistence errors exit
 it separately with `compare` or `gate --release-policy --collection-dir`.
 The [offline example](/waza/guides/controlled-comparisons/) intentionally remains
 inconclusive; no default live/paid execution or adaptive stopping is enabled.
+The native profile supports no skills, deny-all client tools and native
+text/string checks only; hooks, MCP, repositories, cache, concurrency, resume,
+checkpoints, multiturn and other graders are unsupported. Usage limits use
+final observations and best-effort prestart checks, so in-flight overshoot is
+possible; they are not a hard spending cap. Runtime version, provider currency
+and ambiguous output presence remain unavailable.
 Selected assurance additionally persists `assurance-contract.json`,
 `assurance.ndjson` actual-response rows and `assurance-ledger.json`. Sources,
 evaluator evidence and review inputs are rechecked after verification and before
@@ -755,7 +769,7 @@ Assessment rechecks current sources/evidence/review; stored report pass labels
 are not adopted. Use `--format json` for the machine-readable outer contract or
 the default human output. Selected assurance does not promise legacy
 markdown/GitHub Actions layouts. Its nonpass exit is `1`, not the legacy
-exit matrix below. No live SDK, calibration, paid1.1/billing support or automatic
+exit matrix below. No live SDK assurance, calibration, paid1.1/billing support or automatic
 paid validation is selected; old executables reject new command/unknown flags.
 
 ### Exit codes
