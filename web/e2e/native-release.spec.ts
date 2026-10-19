@@ -83,6 +83,53 @@ for (const mutation of ["baseline-only", "candidate-only", "reassigned-arm", "du
   });
 }
 
+for (const mutation of ["initialize", "operational-passed", "behavioral-incomplete", "behavioral-failed"] as const) {
+  test(`accepted native terminal evidence admission without recomputing policy: ${mutation}`, async ({ page }) => {
+    const collections = await nativeReleaseCollections("accepted");
+    const collection = collections[0];
+    const attempts = collection?.decision.native?.attempts;
+    const first = attempts?.[0];
+    if (!collection || !attempts || !first) throw new Error("Producer fixture must contain native evidence.");
+    expect(collection.decision.accepted).toBe(true);
+    expect(attempts).toHaveLength(16);
+    const keys = structuredClone(attempts.map((attempt) => attempt.key));
+    if (mutation === "initialize" || mutation === "behavioral-failed") {
+      const source = await nativeReleaseCollections(mutation === "initialize" ? "initialize" : "retry");
+      const replacement = source[0]?.decision.native?.attempts?.[0];
+      if (!replacement) throw new Error("Producer fixture must contain replacement attempt evidence.");
+      expect(replacement.category).toBe(mutation === "initialize" ? "operational" : "behavioral");
+      expect(replacement.status).toBe(mutation === "initialize" ? "incomplete" : "failed");
+      attempts[0] = { ...replacement, key: first.key };
+    } else {
+      attempts[0] = { ...first, category: mutation === "operational-passed" ? "operational" : "behavioral",
+        status: mutation === "behavioral-incomplete" ? "incomplete" : "passed" };
+    }
+    expect(attempts[0]).not.toEqual(first);
+    expect(attempts.map((attempt) => attempt.key)).toEqual(keys);
+    for (const arm of ["baseline", "candidate"] as const) {
+      expect(attempts.filter((attempt) => attempt.key.arm === arm)).toHaveLength(8);
+      expect(collection.decision.accounting[arm]?.complete_attempts).toBe(8);
+    }
+    await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+    await page.goto("/#/release");
+    if (mutation === "behavioral-failed") {
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.getByText("Selected policy: PASSED", { exact: true })).toBeVisible();
+      await expect(page.getByText("Status: failed", { exact: true })).toHaveCount(1);
+      const downloadEvent = page.waitForEvent("download");
+      await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
+      const path = await (await downloadEvent).path();
+      expect(path).not.toBeNull();
+      expect(JSON.parse(await readFile(path!, "utf8"))).toEqual(collection);
+    } else {
+      await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
+      await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toHaveCount(0);
+    }
+  });
+}
+
 test("downloaded native CSV keeps bare CR output in its original attempt cell", async ({ page }) => {
   const collections = await nativeReleaseCollections("carriage-return");
   const collection = collections[0];

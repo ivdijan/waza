@@ -140,7 +140,9 @@ function validCollection(value: unknown): value is ReleaseCollection {
   const d = value.decision;
   if (Object.prototype.hasOwnProperty.call(d, "native") && !validNative(d.native)) return false;
   if (d.accepted === true && record(d.native) &&
-      (!Array.isArray(d.native.attempts) || d.native.attempts.length === 0)) return false;
+      (!Array.isArray(d.native.attempts) || d.native.attempts.length === 0 ||
+        !d.native.attempts.every((attempt: NativeAttempt) =>
+          attempt.category === "behavioral" && ["passed", "failed"].includes(attempt.status)))) return false;
   if (d.kind !== "waza.release-decision-view" || d.version !== "1.0") {
     throw new Error("Unsupported release decision; not passed.");
   }
