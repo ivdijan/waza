@@ -92,47 +92,58 @@ func sharedClientKey(cliArgs []string) string {
 }
 
 func sharedClientOptions(logLevel string, cliArgs []string) (*copilot.ClientOptions, error) {
+	conn, err := clientConnection(cliArgs)
+	if err != nil {
+		return nil, err
+	}
 	// Client environments are startup-only; later task sessions may create
 	// command mocks even when the first eval or grader does not use them.
 	env, err := commandmock.RuntimeEnvironment()
 	if err != nil {
 		return nil, err
 	}
+	conn.Env = env
+	return &copilot.ClientOptions{LogLevel: logLevel, Connection: conn}, nil
+}
+
+func clientOptions(logLevel string, cliArgs []string) (*copilot.ClientOptions, error) {
+	conn, err := clientConnection(cliArgs)
+	if err != nil {
+		return nil, err
+	}
+	return &copilot.ClientOptions{LogLevel: logLevel, Connection: conn}, nil
+}
+
+func clientConnection(cliArgs []string) (copilot.StdioConnection, error) {
 	// SDK v1.0.0: CLIArgs/CLIPath/AutoStart/AutoRestart moved onto the
 	// Connection (StdioConnection) or were removed. AutoStart/AutoRestart
 	// are managed internally by the SDK now. StdioConnection is consumed
 	// by value, so we set Path before assigning it to opts.Connection.
 	conn := copilot.StdioConnection{
 		Args: append([]string{}, cliArgs...),
-		Env:  env,
+		Env:  os.Environ(),
 	}
 
 	if cliPath := os.Getenv("COPILOT_CLI_PATH"); cliPath != "" {
 		info, err := os.Stat(cliPath)
 		if err != nil {
-			return nil, fmt.Errorf("COPILOT_CLI_PATH %q is not usable: %w", cliPath, err)
+			return copilot.StdioConnection{}, fmt.Errorf("COPILOT_CLI_PATH %q is not usable: %w", cliPath, err)
 		}
 		if info.IsDir() {
-			return nil, fmt.Errorf("COPILOT_CLI_PATH %q is not usable: path is a directory", cliPath)
+			return copilot.StdioConnection{}, fmt.Errorf("COPILOT_CLI_PATH %q is not usable: path is a directory", cliPath)
 		}
 		conn.Path = cliPath
 		slog.Info("using Copilot CLI", "source", "COPILOT_CLI_PATH", "path", cliPath)
-		return &copilot.ClientOptions{
-			LogLevel:   logLevel,
-			Connection: conn,
-		}, nil
+		return conn, nil
 	}
 
 	cliPath, err := embeddedCLIPath()
 	if err != nil {
-		return nil, fmt.Errorf("embedded Copilot CLI is unavailable and COPILOT_CLI_PATH is not set; refusing to fall back to PATH: %w", err)
+		return copilot.StdioConnection{}, fmt.Errorf("embedded Copilot CLI is unavailable and COPILOT_CLI_PATH is not set; refusing to fall back to PATH: %w", err)
 	}
 	conn.Path = cliPath
 	slog.Info("using Copilot CLI", "source", "embedded", "path", cliPath)
-	return &copilot.ClientOptions{
-		LogLevel:   logLevel,
-		Connection: conn,
-	}, nil
+	return conn, nil
 }
 
 type startupErrorClient struct {

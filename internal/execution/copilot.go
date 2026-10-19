@@ -65,6 +65,7 @@ type CopilotEngine struct {
 
 	commandMocksMu      sync.Mutex
 	commandMockSessions map[string]*commandmock.Session
+	disableCommandMocks bool
 
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -173,6 +174,9 @@ type CopilotEngineBuilderOptions struct {
 	NewCopilotClient func(clientOptions *copilot.ClientOptions) CopilotClient
 	// OwnClient selects a fresh production client instead of SharedClient.
 	OwnClient bool
+	// DisableCommandMocks omits the shim registry and rejects command mocks.
+	// Requires OwnClient or a supplied NewCopilotClient factory.
+	DisableCommandMocks bool
 	// DiagnosticObserver enables sanitized, failure-retaining lifecycle diagnostics.
 	// Calls are serialized outside engine state locks. Observers must not reenter
 	// engine lifecycle methods (including Execute, Initialize, DeleteSession, Shutdown).
@@ -198,8 +202,15 @@ func NewCopilotEngineBuilder(defaultModelID string, options *CopilotEngineBuilde
 	provider := providerFromEnv()
 	cliArgs := modelCLIArgs()
 
-	if options != nil && options.OwnClient && options.NewCopilotClient == nil {
-		clientOptions, err := sharedClientOptions("error", cliArgs)
+	disableCommandMocks := options != nil && options.DisableCommandMocks
+	if disableCommandMocks && !options.OwnClient && options.NewCopilotClient == nil {
+		client = &startupErrorClient{err: fmt.Errorf("disabling command mocks requires an owned Copilot client")}
+	} else if options != nil && options.OwnClient && options.NewCopilotClient == nil {
+		resolveOptions := sharedClientOptions
+		if disableCommandMocks {
+			resolveOptions = clientOptions
+		}
+		clientOptions, err := resolveOptions("error", cliArgs)
 		if err != nil {
 			client = &startupErrorClient{err: err}
 		} else {
@@ -229,6 +240,7 @@ func NewCopilotEngineBuilder(defaultModelID string, options *CopilotEngineBuilde
 			ownsClient:          ownsClient,
 			provider:            provider,
 			commandMockSessions: make(map[string]*commandmock.Session),
+			disableCommandMocks: disableCommandMocks,
 		},
 	}
 
@@ -389,6 +401,9 @@ func (e *CopilotEngine) Execute(ctx context.Context, req *ExecutionRequest) (*Ex
 func (e *CopilotEngine) execute(ctx context.Context, req *ExecutionRequest) (*ExecutionResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("nil req was passed to CopilotEngine.Execute")
+	}
+	if e.disableCommandMocks && len(req.CommandMocks) != 0 {
+		return nil, fmt.Errorf("command mocks are disabled for this Copilot engine")
 	}
 
 	modelID, sourceDir, err := e.extractReqParams(req)

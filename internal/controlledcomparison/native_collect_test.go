@@ -18,6 +18,7 @@ import (
 
 	copilot "github.com/github/copilot-sdk/go"
 	"github.com/github/copilot-sdk/go/rpc"
+	"github.com/microsoft/waza/internal/commandmock"
 	"github.com/microsoft/waza/internal/controlledcomparison"
 	"github.com/microsoft/waza/internal/execution"
 	"github.com/microsoft/waza/internal/nativetask"
@@ -200,6 +201,38 @@ func (s *nativeTestSession) UsageMetrics(context.Context) (*rpc.UsageGetMetricsR
 }
 func (s *nativeTestSession) ShutdownUsage(context.Context) (*copilot.SessionShutdownData, error) {
 	return nil, fmt.Errorf("no shutdown usage fallback")
+}
+
+func TestNativeCollectionDefaultClientDoesNotAllocateCommandMockRuntime(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("native durable creation requires Linux or macOS")
+	}
+	require.NoError(t, commandmock.CloseRuntime())
+	t.Cleanup(func() { require.NoError(t, commandmock.CloseRuntime()) })
+	scratch := t.TempDir()
+	t.Setenv("TMPDIR", scratch)
+	t.Setenv("TMP", scratch)
+	t.Setenv("TEMP", scratch)
+	reject := filepath.Join(scratch, "reject-copilot")
+	require.NoError(t, os.WriteFile(reject, []byte("#!/bin/sh\nexit 125\n"), 0o700))
+	t.Setenv("COPILOT_CLI_PATH", reject)
+	source := nativeFixture(t, "fixed-model")
+	policy, err := controlledcomparison.PlanNative(t.Context(), source, source, nativeDesign(), nativeRequirements(), nil)
+	require.NoError(t, err)
+	directory := filepath.Join(t.TempDir(), "native")
+	err = controlledcomparison.CollectNative(t.Context(), policy, source, source, directory)
+	require.ErrorContains(t, err, "operationally incomplete")
+	decision, err := controlledcomparison.ReadSelectedDecision(t.Context(), directory, policy)
+	require.ErrorContains(t, err, "retained failure")
+	require.Len(t, decision.Native.Attempts, 2, "both actual default builders must have been reached")
+	for _, attempt := range decision.Native.Attempts {
+		require.Equal(t, "failed", attempt.Lifecycle["initialize"].State)
+		require.Equal(t, "failed", attempt.Lifecycle["shutdown"].State)
+		require.Equal(t, "unavailable", attempt.OutputAvailability)
+	}
+	registries, err := filepath.Glob(filepath.Join(scratch, "waza-command-mocks-*"))
+	require.NoError(t, err)
+	require.Empty(t, registries, "default native startup failure must not leak the unused registry")
 }
 
 func TestNativeCollectionProductionLifecycle(t *testing.T) {

@@ -371,7 +371,7 @@ func executeNativeAttempt(ctx context.Context, admitted *nativetask.Admitted, re
 	var mu sync.Mutex
 	diagnostics := []execution.ExecutionDiagnostic{}
 	engine := execution.NewCopilotEngineBuilder(request.ModelID, &execution.CopilotEngineBuilderOptions{
-		OwnClient: true, NewCopilotClient: newClient, DiagnosticObserver: func(d execution.ExecutionDiagnostic) error {
+		OwnClient: true, DisableCommandMocks: true, NewCopilotClient: newClient, DiagnosticObserver: func(d execution.ExecutionDiagnostic) error {
 			mu.Lock()
 			defer mu.Unlock()
 			diagnostics = append(diagnostics, d)
