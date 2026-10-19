@@ -22,6 +22,7 @@ type CollectionCapture struct {
 	capture     *projectionCapture
 	projections []byte
 	sources     map[releasepolicy.Arm][]nativetask.CapturedSource
+	verified    map[releasepolicy.Arm]nativetask.VerifiedCollectionSources
 }
 
 func CaptureCollection(ctx context.Context, locations map[releasepolicy.Arm]ArmLocation) (*CollectionCapture, error) {
@@ -68,6 +69,7 @@ func (c *CollectionCapture) initialize(ctx context.Context) error {
 		return err
 	}
 	c.sources = map[releasepolicy.Arm][]nativetask.CapturedSource{}
+	c.verified = map[releasepolicy.Arm]nativetask.VerifiedCollectionSources{}
 	blobs := map[string]string{}
 	for arm, sources := range c.capture.prepared.sources {
 		for _, entry := range sources {
@@ -77,6 +79,10 @@ func (c *CollectionCapture) initialize(ctx context.Context) error {
 				blobs[entry.Digest.SHA256] = content
 			}
 			c.sources[arm] = append(c.sources[arm], nativetask.CapturedSource{Path: entry.Path, Bytes: content, Digest: entry.Digest, Executable: slices.Contains(entry.Roles, "executable")})
+		}
+		c.verified[arm], err = nativetask.VerifyCollectionSources(ctx, c.sources[arm])
+		if err != nil {
+			return err
 		}
 	}
 	return nil
@@ -152,7 +158,11 @@ func (c *CollectionCapture) Primitive(ctx context.Context, arm releasepolicy.Arm
 	if err != nil {
 		return nil, err
 	}
-	return nativetask.PrepareCaptured(ctx, arm, task, request, c.sources[arm])
+	verified, ok := c.verified[arm]
+	if !ok {
+		return nil, fmt.Errorf("missing verified collection source inventory")
+	}
+	return nativetask.PrepareVerifiedCaptured(ctx, arm, task, request, verified)
 }
 
 func (c *CollectionCapture) Join(ctx context.Context, admitted *nativetask.Admitted, key releasepolicy.AttemptKey) error {
@@ -163,7 +173,11 @@ func (c *CollectionCapture) Join(ctx context.Context, admitted *nativetask.Admit
 	if err != nil {
 		return err
 	}
-	return nativetask.MatchCollectionSnapshot(ctx, admitted, key, request, c.sources[key.Arm])
+	verified, ok := c.verified[key.Arm]
+	if !ok {
+		return fmt.Errorf("missing verified collection source inventory")
+	}
+	return nativetask.MatchVerifiedCollectionSnapshot(ctx, admitted, key, request, verified)
 }
 
 type collectionCaptureWire struct {

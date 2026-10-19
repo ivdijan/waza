@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/microsoft/waza/internal/evidence"
 	"github.com/microsoft/waza/internal/execution"
 	"github.com/microsoft/waza/internal/models"
 	"github.com/microsoft/waza/internal/releasepolicy"
@@ -81,6 +82,95 @@ func TestCollectionPreparationReferencesLargeExecutableWithoutExpandingAttempts(
 	require.NoError(t, file.Close())
 	_, err = Prepare(t.Context(), releasepolicy.Baseline, "task", req, []Source{{root, "evaluator"}})
 	require.Error(t, err, "private 1.0 cap must not be loosened")
+}
+
+func TestVerifiedCollectionSourcesFreezeValidatedDescriptors(t *testing.T) {
+	_, admitted, req, sources, _ := collectionFixture(t)
+	original := sources[0].Digest
+	verified, err := VerifyCollectionSources(t.Context(), sources)
+	require.NoError(t, err)
+
+	sources[0].Bytes = "mutated after verification"
+	sources[0].Digest = releasepolicy.SourceDigest([]byte(sources[0].Bytes))
+	prepared, err := PrepareVerifiedCaptured(t.Context(), releasepolicy.Baseline, "task", req, verified)
+	require.NoError(t, err)
+	data, err := prepared.view()
+	require.NoError(t, err)
+	require.Equal(t, original, data.Sources[0].Digest)
+
+	binding, err := admitted.Binding()
+	require.NoError(t, err)
+	require.NoError(t, MatchVerifiedCollectionSnapshot(t.Context(), admitted, binding.Key, req, verified))
+
+	sources[0].Digest.SHA256 = strings.Repeat("a", 64)
+	_, err = VerifyCollectionSources(t.Context(), sources)
+	require.ErrorContains(t, err, "invalid retained native source inventory")
+}
+
+func BenchmarkCollectionDescriptorAdmission81MiB(b *testing.B) {
+	benchmarkCollectionDescriptorAdmission(b, false)
+}
+
+func BenchmarkVerifiedCollectionDescriptorAdmission81MiB(b *testing.B) {
+	benchmarkCollectionDescriptorAdmission(b, true)
+}
+
+func benchmarkCollectionDescriptorAdmission(b *testing.B, useVerified bool) {
+	b.Helper()
+	request := &execution.ExecutionRequest{ModelID: "observed-test-model", Message: "synthetic prompt", NoSkills: true,
+		SkipWorkspaceCapture: true, ToolPolicy: &execution.ToolPolicy{Mode: execution.ToolPolicyDenyAll},
+		Resources: []execution.ResourceFile{}, Instructions: []execution.InstructionFile{}, Context: map[string]any{}}
+	content := strings.Repeat("x", 81<<20)
+	sources := []CapturedSource{{Executable: true, Path: "evaluator", Bytes: content, Digest: releasepolicy.SourceDigest([]byte(content))}}
+	verified, err := VerifyCollectionSources(b.Context(), sources)
+	require.NoError(b, err)
+
+	prepare := func() (*Prepared, error) {
+		if useVerified {
+			return PrepareVerifiedCaptured(b.Context(), releasepolicy.Baseline, "task", request, verified)
+		}
+		return PrepareCaptured(b.Context(), releasepolicy.Baseline, "task", request, sources)
+	}
+	initial, err := prepare()
+	require.NoError(b, err)
+	profile := benchmarkCollectionProfile(b, initial.RequestDigest())
+	key := releasepolicy.AttemptKey{SampleKey: releasepolicy.SampleKey{ClusterID: "cluster", TaskID: "task", Trial: 1},
+		Arm: releasepolicy.Baseline, EvalID: "eval", Attempt: 1}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		prepared, err := prepare()
+		require.NoError(b, err)
+		admitted, err := Admit(b.Context(), prepared, profile, key)
+		require.NoError(b, err)
+		if useVerified {
+			err = MatchVerifiedCollectionSnapshot(b.Context(), admitted, key, request, verified)
+		} else {
+			err = MatchCollectionSnapshot(b.Context(), admitted, key, request, sources)
+		}
+		require.NoError(b, err)
+	}
+}
+
+func benchmarkCollectionProfile(b *testing.B, requestDigest models.EvidenceDigest) *Profile {
+	b.Helper()
+	digest := func(value string) models.EvidenceDigest {
+		result, err := evidence.JSONDigest(value)
+		require.NoError(b, err)
+		return *result
+	}
+	profile := Profile{Kind: profileKind, Version: "2.0", Selection: Selection{"native_text_task", "2.0"},
+		Nonce: strings.Repeat("a", 64), PermissionMode: "deny_all", PolicyDigest: digest("policy"),
+		Arms: map[releasepolicy.Arm]ArmPlan{}}
+	for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
+		profile.Arms[arm] = ArmPlan{PlanDigest: digest(string(arm)), Requests: []RequestPlan{{TaskID: "task", RequestDigest: requestDigest}}}
+	}
+	raw, err := releasepolicy.SealJSON(profile)
+	require.NoError(b, err)
+	decoded, err := DecodeProfile(raw)
+	require.NoError(b, err)
+	return decoded
 }
 
 func TestCollectionPreparationRawInventoryBoundary(t *testing.T) {

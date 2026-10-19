@@ -231,6 +231,8 @@ func TestMatchSnapshotDoesNotUpgradePrimitiveCaps(t *testing.T) {
 			// comparison API has no supplied-seal or preparation setter.
 			admitted.prepared.data = encoded(t, data)
 			admitted.prepared.seal = digest(t, data)
+			admitted.prepared.sealCheck = admitted.prepared.seal
+			admitted.prepared.dataDigest = releasepolicy.SourceDigest(admitted.prepared.data)
 			binding, err := admitted.Binding()
 			require.NoError(t, err)
 			sources := []CapturedSource{{Path: "eval.yaml", Bytes: string(data.Sources[0].Bytes), Digest: data.Sources[0].Digest}}

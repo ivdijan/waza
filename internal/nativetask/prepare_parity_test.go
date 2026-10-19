@@ -100,7 +100,8 @@ func originalPrepare(ctx context.Context, arm releasepolicy.Arm, taskID string, 
 	if err != nil {
 		return nil, err
 	}
-	return &Prepared{payload, *seal, *requestDigest}, nil
+	return &Prepared{data: payload, seal: *seal, sealCheck: *seal, dataDigest: releasepolicy.SourceDigest(payload),
+		requestDigest: *requestDigest, requestSeal: *requestDigest}, nil
 }
 
 func TestPrepareFrozenSourceParity(t *testing.T) {
