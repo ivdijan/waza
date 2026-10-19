@@ -462,6 +462,89 @@ func TestLegacySessionDefaultsDoNotCertifyAbsence(t *testing.T) {
 		decoded.Capabilities(), "neither default counts nor received model completeness certify tool/session evidence")
 }
 
+func TestPublicTapeReaderBindsBehavioralObservedModelsToRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*Record)
+		wantErr string
+	}{
+		{
+			name: "behavioral event model mismatch",
+			mutate: func(r *Record) {
+				r.EventModels = EventModels{Models: []string{"substituted-model"}, EventsObserved: 1, Complete: true}
+			},
+			wantErr: "observed model differs from fixed requested model",
+		},
+		{
+			name: "behavioral accounting model mismatch",
+			mutate: func(r *Record) {
+				r.Accounting = Accounting{SessionKey: r.Response.SessionKey, Source: "rpc", Models: []string{"substituted-model"},
+					ProviderCurrencyState: "unavailable", Reason: "Partial SDK accounting observation."}
+			},
+			wantErr: "observed model differs from fixed requested model",
+		},
+		{
+			name: "operational mismatch retained",
+			mutate: func(r *Record) {
+				*r = operational(*r, "Observed SDK model differs from fixed requested model.")
+				r.EventModels = EventModels{Models: []string{"substituted-model"}, EventsObserved: 1, Complete: true}
+				r.Accounting = Accounting{SessionKey: r.Response.SessionKey, Source: "events", Models: []string{"substituted-model"},
+					ProviderCurrencyState: "unavailable", Reason: "Partial SDK accounting observation."}
+			},
+		},
+		{
+			name: "matching observed models",
+			mutate: func(r *Record) {
+				zero := 0.0
+				r.EventModels = EventModels{Models: []string{"observed-test-model"}, EventsObserved: 1, Complete: true}
+				r.Accounting = Accounting{SessionKey: r.Response.SessionKey, Source: "rpc", Complete: true,
+					ModelAttributionComplete: true, Models: []string{"observed-test-model"}, ProviderCurrencyState: "unavailable",
+					Usage: &models.UsageStats{AICredits: &zero, ModelMetrics: map[string]models.ModelUsage{
+						"observed-test-model": {AICredits: &zero},
+					}}}
+			},
+		},
+		{
+			name:   "legacy absent observations",
+			mutate: func(*Record) {},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, admitted, record := fixture(t)
+			tc.mutate(&record)
+			prefix, err := readRecordThroughPublicReader(t, admitted, encoded(t, record))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Empty(t, prefix.Records)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, prefix.Records, 1)
+			require.Equal(t, record.Summary.Category, prefix.Records[0].Summary.Category)
+		})
+	}
+}
+
+func readRecordThroughPublicReader(t *testing.T, admitted *Admitted, raw []byte) (*Prefix, error) {
+	t.Helper()
+	binding, err := admitted.Binding()
+	require.NoError(t, err)
+	var record Record
+	require.NoError(t, decodeExact(raw, &record))
+	recordDigest, rowDigest, err := recordDigests(raw)
+	require.NoError(t, err)
+	events := append(encoded(t, Event{Kind: eventKind, Version: version, Sequence: 1, Type: "start", Admission: binding}), '\n')
+	events = append(events, encoded(t, Event{Kind: eventKind, Version: version, Sequence: 2, Type: "terminal", Admission: binding,
+		State: record.Summary.Category, RecordDigest: recordDigest, RowDigest: rowDigest})...)
+	events = append(events, '\n')
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+	require.NoError(t, root.WriteFile(eventFile, events, 0o600))
+	require.NoError(t, root.WriteFile(payloadFile, append(bytes.Clone(raw), '\n'), 0o600))
+	return ReadPrefix(t.Context(), root, []*Admitted{admitted})
+}
+
 func TestFinalAccountingZeroVersusMissingAndPartial(t *testing.T) {
 	_, _, admitted, r := fixture(t)
 	zero := 0.0

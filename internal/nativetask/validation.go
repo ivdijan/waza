@@ -266,6 +266,11 @@ func DecodeRecord(raw []byte, admitted *Admitted) (*Record, error) {
 	if err := validateModels(r.Accounting.Models); err != nil {
 		return nil, err
 	}
+	if r.Summary.Category == "behavioral" {
+		if err := validateObservedModels(data.Request.Model, r.EventModels.Models, r.Accounting.Models); err != nil {
+			return nil, err
+		}
+	}
 	if r.EventModels.Complete && (r.EventModels.EventsObserved == 0 || len(r.EventModels.Models) == 0) ||
 		r.Accounting.ModelAttributionComplete && len(r.Accounting.Models) == 0 {
 		return nil, fmt.Errorf("native complete model observation is empty")
@@ -442,6 +447,17 @@ func validateModels(models []string) error {
 			return fmt.Errorf("native model inventory must be known, ordered and unique")
 		}
 		last = model
+	}
+	return nil
+}
+
+func validateObservedModels(requested string, observations ...[]string) error {
+	for _, models := range observations {
+		for _, model := range models {
+			if model != requested {
+				return fmt.Errorf("native observed model differs from fixed requested model")
+			}
+		}
 	}
 	return nil
 }
