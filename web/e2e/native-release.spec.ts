@@ -1,33 +1,54 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { nativeReleaseCollections, nativeScenarios } from "./fixtures/native-release-data";
+import { parseCSV } from "./helpers/csv";
 
-function parseCSV(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (char === '"') {
-      if (quoted && text[index + 1] === '"') {
-        cell += '"';
-        index++;
-      } else quoted = !quoted;
-    } else if (!quoted && (char === "," || char === "\n")) {
-      row.push(cell);
-      cell = "";
-      if (char === "\n") {
-        rows.push(row);
-        row = [];
-      }
-    } else cell += char;
+test("downloaded native CSV keeps bare CR output in its original attempt cell", async ({ page }) => {
+  const collections = await nativeReleaseCollections("carriage-return");
+  const collection = collections[0];
+  const attempts = collection?.decision.native?.attempts;
+  if (!collection || !attempts) throw new Error("Producer fixture must contain native attempts.");
+  expect(attempts).toHaveLength(2);
+  expect(attempts.map((attempt) => attempt.output)).toEqual(["hello\r=1+1", "hello\r=1+1"]);
+  expect(collection.error).toBeUndefined();
+  expect(collection.decision.operations.state).toBe("observed");
+  await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+  await page.goto("/#/release");
+  const downloadEvent = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export native attempts CSV", exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe("waza-native-attempts.csv");
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const csv = await readFile(path!, "utf8");
+  expect(csv.match(/,available,true,"hello\r=1\+1",/g)).toHaveLength(2);
+  const [headers, ...rows] = parseCSV(csv);
+  if (!headers) throw new Error("CSV header missing.");
+  expect(rows).toHaveLength(2);
+  for (const [index, attempt] of attempts.entries()) {
+    const row = rows[index];
+    expect(row).toHaveLength(headers.length);
+    const value = (name: string) => {
+      const column = headers.indexOf(name);
+      expect(column).toBeGreaterThanOrEqual(0);
+      return row?.[column];
+    };
+    expect(value("Arm")).toBe(attempt.key.arm);
+    expect(value("Cluster")).toBe(attempt.key.cluster_id);
+    expect(value("Task")).toBe(attempt.key.task_id);
+    expect(value("Trial")).toBe(String(attempt.key.trial_ordinal));
+    expect(value("Eval")).toBe(attempt.key.eval_id);
+    expect(value("Attempt")).toBe(String(attempt.key.attempt_ordinal));
+    expect(value("Output availability")).toBe("available");
+    expect(value("Output present")).toBe("true");
+    expect(value("Output")).toBe("hello\r=1+1");
   }
-  expect(quoted).toBe(false);
-  row.push(cell);
-  rows.push(row);
-  return rows;
-}
+  const unquoted = csv.replaceAll('"hello\r=1+1"', "hello\r=1+1");
+  expect(unquoted).not.toBe(csv);
+  const [, ...splitRows] = parseCSV(unquoted);
+  expect(splitRows).toHaveLength(4);
+  expect(splitRows.filter((row) => row[0] === "=1+1")).toHaveLength(2);
+});
 
 for (const scenario of nativeScenarios) {
   test(`producer native ${scenario} remains a non-passing collection with exact attempt evidence`, async ({ page }) => {

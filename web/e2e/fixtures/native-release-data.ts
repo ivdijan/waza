@@ -6,7 +6,7 @@ export const nativeScenarios = [
   "empty-output", "unknown-usage", "unknown-budget", "reached-budget",
 ] as const;
 
-export async function nativeReleaseCollections(scenario: typeof nativeScenarios[number] | "accepted") {
+export async function nativeReleaseCollections(scenario: typeof nativeScenarios[number] | "accepted" | "carriage-return") {
   const path = new URL(`../../../internal/controlledcomparison/testdata/native-api-${scenario}.json`, import.meta.url);
   const wire: unknown = JSON.parse(await readFile(path, "utf8"));
   return parseReleaseCollections(wire);
