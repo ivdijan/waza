@@ -3,6 +3,43 @@ import { readFile } from "node:fs/promises";
 import { nativeReleaseCollections, nativeScenarios } from "./fixtures/native-release-data";
 import { parseCSV } from "./helpers/csv";
 
+for (const attempts of [null, []]) {
+  test(`accepted native decision rejects missing observations ${JSON.stringify(attempts)}`, async ({ page }) => {
+    const collections = await nativeReleaseCollections("accepted");
+    const collection = collections[0];
+    if (!collection?.decision.native) throw new Error("Producer fixture must contain native evidence.");
+    expect(collection.decision.accepted).toBe(true);
+    expect(collection.decision.native.attempts).toHaveLength(16);
+    collection.decision.native.attempts = attempts;
+    await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+    await page.goto("/#/release");
+    await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
+    await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toHaveCount(0);
+  });
+
+  test(`nonpassing native decision preserves missing observations ${JSON.stringify(attempts)}`, async ({ page }) => {
+    const collections = await nativeReleaseCollections("passed");
+    const collection = collections[0];
+    if (!collection?.decision.native) throw new Error("Producer fixture must contain native evidence.");
+    expect(collection.decision.accepted).toBe(false);
+    expect(collection.decision.native.attempts).toHaveLength(2);
+    collection.decision.native.attempts = attempts;
+    await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+    await page.goto("/#/release");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByText("Selected policy: NOT PASSED", { exact: true })).toBeVisible();
+    await expect(page.getByText("No native attempt observations available.", { exact: true })).toBeVisible();
+    const downloadEvent = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
+    const download = await downloadEvent;
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    expect(JSON.parse(await readFile(path!, "utf8"))).toEqual(collection);
+  });
+}
+
 test("downloaded native CSV keeps bare CR output in its original attempt cell", async ({ page }) => {
   const collections = await nativeReleaseCollections("carriage-return");
   const collection = collections[0];
