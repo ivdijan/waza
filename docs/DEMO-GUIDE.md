@@ -25,8 +25,9 @@ for its supported scope, artifacts and limits.
 ![Native release evidence view with recovered attempts and unavailable values](https://raw.githubusercontent.com/microsoft/waza/main/docs/images/native-release-evidence.png)
 
 *Deterministic SDK-fake illustration of a nonpassing golden-veto decision.
-Provider, runtime, currency and assurance remain unavailable; this screenshot
-demonstrates rendering, not paid/live execution or model quality.*
+Runtime version and provider currency are unavailable; native assurance is
+unsupported. This screenshot demonstrates rendering, not paid/live execution
+or model quality.*
 
 Before any demo, ensure waza is installed:
 
