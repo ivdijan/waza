@@ -1,15 +1,16 @@
-name: Diagnostic d6ee native late failure Linux profile
+name: Diagnostic d6ee full controlledcomparison package isolation
 
 # Disposable infrastructure only. Never merge into the feature or default branch.
 on:
   push:
     branches: [spboyer-basher-gating-linux-profile-assets]
+    paths: [.github/workflows/diagnostic-native-late-failure.yml]
 
 permissions:
   contents: read
 
 jobs:
-  profile:
+  isolation:
     if: github.ref == 'refs/heads/spboyer-basher-gating-linux-profile-assets' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 65
@@ -31,7 +32,7 @@ jobs:
       - name: Initialize retained evidence
         run: |
           set -euo pipefail
-          dir="$RUNNER_TEMP/native-late-failure-evidence"
+          dir="$RUNNER_TEMP/full-package-isolation-evidence"
           mkdir -m 700 "$dir"
           echo "EVIDENCE_DIR=$dir" >> "$GITHUB_ENV"
           date +%s > "$dir/setup-start-epoch.txt"
@@ -43,10 +44,14 @@ jobs:
             cat /etc/os-release
             lscpu
             free -b
-            printf 'Diagnostic only: no acceptance gate or before/after measurement.\n'
-            printf 'CPU/heap/coverage may be incomplete or absent after panic, timeout or setup failure.\n'
-            printf 'Default CPU/allocation sampling; profiling perturbs execution; heap is not RSS.\n'
-            printf 'Rebuilt dashboard bytes must match the retained d6ee dashboard artifact seven-file vector before Go compilation/profiling.\n'
+            printf 'Distinct full-package isolation experiment; not a retry, full-suite acceptance, causal, improvement or before/after measurement.\n'
+            printf 'One go test workload: all normally selected controlledcomparison tests/examples/fuzz seeds; no other package test workload.\n'
+            printf 'Unlike the prior family profile, this command has no CPU/heap instrumentation; race and atomic coverage remain enabled.\n'
+            printf 'Coverage/binary/events/resources may be incomplete or absent after failure; retain observed data, never infer success or zero.\n'
+            printf 'Required GNU time -v reports raw maximum resident set size in kbytes for the timed go command/children, not aggregate process-tree RAM.\n'
+            printf 'Listing-only discovery runs the actual retained binary after measurement with -test.list; no tests or benchmarks selected by that invocation.\n'
+            printf 'Frozen-reader/current-control subprocesses invoked by normal package tests remain genuine; optional external built-CLI/frozen-reader smoke is not enabled.\n'
+            printf 'Rebuilt dashboard bytes must match the retained d6ee dashboard artifact seven-file vector before Go compilation/test execution.\n'
             printf 'Dashboard artifact equality does not prove historical Go-binary identity or hosted filesystem modes.\n'
             printf 'Limits: setup admission 15m, build/test step 40m including unchanged test timeout 30m, seal 3m, upload 5m, job 65m.\n'
           } > "$dir/metadata.txt"
@@ -192,11 +197,11 @@ jobs:
           retain('asset-comparison.json', result);
           console.log(JSON.stringify(result, null, 2));
           if (!pass) {
-            console.error('Dashboard asset admission failed; Go compilation/profiling must not start.');
+            console.error('Dashboard asset admission failed; Go compilation/test execution must not start.');
             process.exitCode = 1;
           }
           NODE
-      - name: One unchanged full-package instrumented test-family measurement
+      - name: One full controlledcomparison package isolation measurement
         timeout-minutes: 40
         run: |
           set -euo pipefail
@@ -204,19 +209,30 @@ jobs:
           printf '%s\n' "$elapsed" > "$EVIDENCE_DIR/setup-elapsed-seconds.txt"
           test "$elapsed" -lt 900
           unset WAZA_ASSURANCE_CLI WAZA_FROZEN_RELEASE_READER UPDATE_NATIVE_API_FIXTURES WAZA_EVIDENCE_JUDGE_CANARY
+          unset WAZA_NATIVE_READER_ORACLE_INPUT WAZA_NATIVE_READER_ORACLE_OUTPUT WAZA_READER_PROOF_DIR
           unset GH_TOKEN GITHUB_TOKEN COPILOT_GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
           env | grep -E '^(NO_COLOR|WAZA_NO_UPDATE_CHECK|ENABLE_.*TESTS|WAZA_EVIDENCE_JUDGE_RUNTIME_TEST|COPILOT_CLI_PATH|HOME|XDG_CONFIG_HOME)=' | LC_ALL=C sort > "$EVIDENCE_DIR/offline-environment.txt"
+          if [[ ! -x /usr/bin/time ]]; then
+            printf 'Required /usr/bin/time unavailable; no workload started\n' > "$EVIDENCE_DIR/resource-unavailable.txt"
+            exit 1
+          fi
+          if ! /usr/bin/time --version > "$EVIDENCE_DIR/time-version.txt" 2> "$EVIDENCE_DIR/time-version.stderr"; then
+            printf 'Required GNU time version check failed; no workload started\n' > "$EVIDENCE_DIR/resource-unavailable.txt"
+            exit 1
+          fi
+          if ! grep -q 'GNU [Tt]ime' "$EVIDENCE_DIR/time-version.txt"; then
+            printf 'Required GNU time -v unavailable; no workload started\n' > "$EVIDENCE_DIR/resource-unavailable.txt"
+            exit 1
+          fi
           command=(go test -count=1 -v -json -race -timeout=30m -covermode=atomic
             -coverprofile="$EVIDENCE_DIR/coverage.txt"
-            -cpuprofile="$EVIDENCE_DIR/cpu.pprof"
-            -memprofile="$EVIDENCE_DIR/heap.pprof"
             -o "$EVIDENCE_DIR/controlledcomparison.test"
-            -run '^TestNativeLateFailurePreservesEveryStartedAttempt$' ./internal/controlledcomparison)
+            ./internal/controlledcomparison)
           printf '%q ' "${command[@]}" > "$EVIDENCE_DIR/command.txt"
           printf '\n' >> "$EVIDENCE_DIR/command.txt"
           date -u +%FT%T.%NZ > "$EVIDENCE_DIR/command-start.txt"
           set +e
-          "${command[@]}" 2> >(tee "$EVIDENCE_DIR/test.stderr" >&2) | tee "$EVIDENCE_DIR/test.jsonl"
+          LC_ALL=C /usr/bin/time -v -o "$EVIDENCE_DIR/resource.txt" "${command[@]}" 2> >(tee "$EVIDENCE_DIR/test.stderr" >&2) | tee "$EVIDENCE_DIR/test.jsonl"
           codes=("${PIPESTATUS[@]}")
           set -e
           printf '%s\n' "${codes[0]}" > "$EVIDENCE_DIR/test-exit.txt"
@@ -224,13 +240,16 @@ jobs:
           date -u +%FT%T.%NZ > "$EVIDENCE_DIR/command-end.txt"
           test "${codes[1]}" -eq 0
           exit "${codes[0]}"
-      - name: Check actual subcases and seal all available evidence
+      - name: Verify complete selection and seal all available isolation evidence
         if: always()
         timeout-minutes: 3
         run: |
           set -euo pipefail
           cd "$EVIDENCE_DIR"
           status=0
+          unset WAZA_ASSURANCE_CLI WAZA_FROZEN_RELEASE_READER UPDATE_NATIVE_API_FIXTURES WAZA_EVIDENCE_JUDGE_CANARY
+          unset WAZA_NATIVE_READER_ORACLE_INPUT WAZA_NATIVE_READER_ORACLE_OUTPUT WAZA_READER_PROOF_DIR
+          unset GH_TOKEN GITHUB_TOKEN COPILOT_GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
           if [[ -f controlledcomparison.test ]]; then
             {
               file controlledcomparison.test
@@ -239,6 +258,17 @@ jobs:
               go version -m controlledcomparison.test
               go tool buildid controlledcomparison.test
             } > binary-identity.txt 2> binary-identity.stderr || status=1
+            sha256sum controlledcomparison.test > binary-before-list.sha256 || status=1
+            printf '%s\n' 'timeout --signal=TERM --kill-after=5s 20s ./controlledcomparison.test -test.list=^(Test|Example|Fuzz) (listing only; not a second test workload)' > discovery-command.txt
+            date -u +%FT%T.%NZ > discovery-start.txt
+            set +e
+            timeout --signal=TERM --kill-after=5s 20s ./controlledcomparison.test '-test.list=^(Test|Example|Fuzz)' > discoverable-tests.txt 2> discovery.stderr
+            discovery_exit=$?
+            set -e
+            printf '%s\n' "$discovery_exit" > discovery-exit.txt
+            date -u +%FT%T.%NZ > discovery-end.txt
+            [[ "$discovery_exit" -eq 0 ]] || status=1
+            sha256sum -c binary-before-list.sha256 > binary-after-list-check.txt 2> binary-after-list-check.stderr || status=1
           else
             printf 'Test binary unavailable\n' > binary-unavailable.txt
             status=1
@@ -247,29 +277,127 @@ jobs:
             jq -rj 'select(.Action == "output") | .Output' test.jsonl > test.log || status=1
             jq -r 'select(.Action == "run" or .Action == "pass" or .Action == "fail" or .Action == "skip") | [.Time,.Action,.Test // "<package>",.Elapsed // ""] | @tsv' test.jsonl > test-status.tsv || status=1
             jq -r 'select(.Action == "pass" and .Test != null) | .Test' test.jsonl | LC_ALL=C sort > passed-tests.txt || status=1
-            prefix=TestNativeLateFailurePreservesEveryStartedAttempt
-            {
-              printf '%s\n' "$prefix"
-              for name in before-start during-execution during-shutdown between-attempts before-publication publication-conflict overshoot reused-session; do
-                printf '%s/%s\n' "$prefix" "$name"
-              done
-            } | LC_ALL=C sort > expected-passed-tests.txt
-            diff -u expected-passed-tests.txt passed-tests.txt > subcase-verification.diff || status=1
           else
             printf 'Test output unavailable\n' > output-unavailable.txt
             status=1
           fi
-          for profile in cpu heap; do
-            index=cpu
-            [[ "$profile" == heap ]] && index=alloc_space
-            if [[ -s "$profile.pprof" && -f controlledcomparison.test ]]; then
-              go tool pprof -top -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile.pprof" > "$profile.top.txt" 2> "$profile.top.stderr" || status=1
-              go tool pprof -top -cum -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile.pprof" > "$profile.cum.txt" 2> "$profile.cum.stderr" || status=1
-            else
-              printf '%s profile absent or empty\n' "$profile" > "$profile.unavailable.txt"
-              status=1
-            fi
-          done
+          node <<'NODE' || status=1
+          const fs = require('node:fs');
+          const errors = [];
+          function read(name) {
+            try {
+              return fs.readFileSync(name, 'utf8');
+            } catch (error) {
+              errors.push(`${name}: ${error.code || error.name}: ${error.message}`);
+              return null;
+            }
+          }
+          const packageName = 'github.com/microsoft/waza/internal/controlledcomparison';
+          const listing = read('discoverable-tests.txt');
+          const listed = listing === null ? [] : listing.split('\n').filter(Boolean);
+          if (listed.length === 0) errors.push('Discovery is empty/unavailable');
+          if (new Set(listed).size !== listed.length || listed.some(name => !/^(Test|Example|Fuzz)[^/\s]*$/.test(name))) errors.push('Invalid or duplicate discoverable names');
+          if (read('discovery-exit.txt')?.trim() !== '0') errors.push('Listing-only discovery did not exit zero');
+          const raw = read('test.jsonl');
+          const events = [];
+          for (const [index, line] of (raw || '').split('\n').entries()) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              if (!event || typeof event !== 'object' || typeof event.Action !== 'string') throw new Error('Invalid event shape');
+              events.push(event);
+            } catch (error) {
+              errors.push(`JSONL line ${index + 1}: ${error.message}`);
+            }
+          }
+          const tests = new Map();
+          const packageEvents = [];
+          for (const event of events) {
+            if (!['start', 'run', 'pause', 'cont', 'pass', 'fail', 'skip', 'output', 'build-output', 'build-fail'].includes(event.Action)) errors.push(`Unexpected event action: ${event.Action}`);
+            if (['build-output', 'build-fail'].includes(event.Action)) {
+              if (event.Action === 'build-fail') errors.push(`Build failed: ${event.ImportPath || event.Package || 'unknown'}`);
+              continue;
+            }
+            if (event.Package !== packageName) {
+              errors.push(`Unexpected package workload/event: ${event.Package || '<missing>'}`);
+              continue;
+            }
+            if (!event.Test) {
+              if (!['start', 'output', 'pass', 'fail', 'skip'].includes(event.Action)) errors.push(`Test action without a test name: ${event.Action}`);
+              packageEvents.push(event);
+              continue;
+            }
+            if (typeof event.Test !== 'string' || !listed.includes(event.Test.split('/')[0])) {
+              errors.push(`Unexpected test event: ${event.Test}`);
+              continue;
+            }
+            if (!tests.has(event.Test)) tests.set(event.Test, { name: event.Test, runs: [], terminals: [], output: '' });
+            const test = tests.get(event.Test);
+            if (event.Action === 'run') test.runs.push(event);
+            if (['pass', 'fail', 'skip'].includes(event.Action)) test.terminals.push(event);
+            if (event.Action === 'output' && typeof event.Output === 'string') test.output += event.Output;
+          }
+          const allowedSkips = {
+            TestAssuredBuiltCLIWorkflow: 'manual built-CLI smoke requires WAZA_ASSURANCE_CLI',
+            TestNativeUnsupportedPlatformBeforeEffects: 'native platform rejection is exercised on unsupported hosts',
+          };
+          const ledger = [...tests.values()].map(test => ({
+            name: test.name, runs: test.runs.length, terminals: test.terminals.map(event => ({ action: event.Action, time: event.Time, elapsed: event.Elapsed })),
+            start: test.runs[0]?.Time || null, outcome: test.terminals[0]?.Action || 'incomplete',
+            skipReasonEvidence: test.terminals[0]?.Action === 'skip' ? test.output : null,
+          }));
+          for (const name of listed) {
+            if (!tests.has(name)) errors.push(`Discoverable test not selected/observed: ${name}`);
+          }
+          for (const test of tests.values()) {
+            if (test.runs.length !== 1 || test.terminals.length !== 1) errors.push(`Incomplete/duplicate run or terminal: ${test.name}`);
+            if (test.terminals.some(event => event.Action === 'fail')) errors.push(`Failed test: ${test.name}`);
+            if (test.terminals.some(event => event.Action === 'skip') && (!allowedSkips[test.name] || !test.output.includes(allowedSkips[test.name]))) errors.push(`Unexpected or unexplained skip: ${test.name}`);
+            if (!allowedSkips[test.name] && test.terminals[0]?.Action !== 'pass') errors.push(`Required execution did not pass: ${test.name}`);
+          }
+          for (const [name, reason] of Object.entries(allowedSkips)) {
+            const test = tests.get(name);
+            if (test?.terminals[0]?.Action !== 'skip' || !test.output.includes(reason)) errors.push(`Frozen Linux intentional skip not documented: ${name}`);
+          }
+          const required = [
+            'TestOriginalMockSourceProjectionParity', 'TestOriginalMockPolicyGoldenUnionParity', 'TestOriginalMockGuardAndLockErrorParity',
+            'TestNativeReaderSuppliedDecisionProcess', 'TestNativeReaderFrozen15cDecisionParity',
+            'TestNativeInnerProfileRejectsFrozenPolicyMemberOracle', 'TestNativeCollectionProductionLifecycle',
+            'TestNativeArtifactRejectsFIFOReplacementBeforeOpen', 'TestNativeArtifactPublicWireBoundBeforeOpen',
+            'TestNativeLateFailurePreservesEveryStartedAttempt',
+            ...['before-start', 'during-execution', 'during-shutdown', 'between-attempts', 'before-publication', 'publication-conflict', 'overshoot', 'reused-session'].map(name => `TestNativeLateFailurePreservesEveryStartedAttempt/${name}`),
+            ...['writer', 'whitespace', 'escaped_member', 'member_order', 'trailing_document', 'duplicate_blob', 'unsafe_truncated_object', 'unicode_before_syntax', 'blob_failure_before_unknown', 'unknown_before_blob_failure'].map(name => `TestNativeReaderFrozen15cDecisionParity/${name}`),
+          ];
+          for (const name of required) {
+            if (tests.get(name)?.terminals[0]?.Action !== 'pass') errors.push(`Required portable/Linux/oracle/family case did not pass: ${name}`);
+          }
+          const packageStarts = packageEvents.filter(event => event.Action === 'start');
+          const packageTerminals = packageEvents.filter(event => ['pass', 'fail', 'skip'].includes(event.Action));
+          if (packageStarts.length !== 1 || packageTerminals.length !== 1 || packageTerminals[0]?.Action !== 'pass') errors.push('Package lacks exactly one start and successful completion');
+          if (read('test-exit.txt')?.trim() !== '0' || read('tee-exit.txt')?.trim() !== '0') errors.push('Go workload/tee nonzero or exit unavailable');
+          const start = read('command-start.txt')?.trim();
+          const end = read('command-end.txt')?.trim();
+          if (!Number.isFinite(Date.parse(start)) || !Number.isFinite(Date.parse(end)) || Date.parse(end) <= Date.parse(start)) errors.push('Compile+test interval unavailable/invalid');
+          const resource = read('resource.txt');
+          const rss = resource?.match(/^\s*Maximum resident set size \(kbytes\): (\d+)\s*$/m);
+          const timedExit = resource?.match(/^\s*Exit status: (\d+)\s*$/m);
+          if (!rss || !timedExit || timedExit[1] !== '0') errors.push('Required GNU time raw RSS/exit receipt unavailable or unsuccessful');
+          if (!read('time-version.txt')?.match(/GNU [Tt]ime/)) errors.push('GNU time version evidence unavailable');
+          const coverage = read('coverage.txt');
+          if (!coverage?.startsWith('mode: atomic\n') || coverage.trim().split('\n').length < 2) errors.push('Nonempty atomic coverage unavailable');
+          const report = {
+            complete: errors.length === 0, errors, discoverable: listed, ledger, packageEvents,
+            compileAndTest: { start: start || null, end: end || null, durationSeconds: Number.isFinite(Date.parse(start)) && Number.isFinite(Date.parse(end)) ? (Date.parse(end) - Date.parse(start)) / 1000 : null },
+            resources: { maximumResidentSetSize: rss ? rss[1] : null, unit: 'kbytes (GNU time raw)', exit: timedExit ? timedExit[1] : null, scope: 'Timed go command/compiler/test children maximum, not aggregate process-tree RAM; no predicted budget or before/after claim' },
+            optionalNotEnabled: ['WAZA_ASSURANCE_CLI manual built-CLI smoke', 'WAZA_FROZEN_RELEASE_READER external historical binary smoke; normal internal frozen15c/current-control subprocesses remain required'],
+          };
+          fs.writeFileSync('selection-verification.json', JSON.stringify(report, null, 2) + '\n');
+          console.log(JSON.stringify(report, null, 2));
+          if (!report.complete) {
+            console.error('Full-package isolation evidence incomplete/failed; raw artifacts retained, not acceptance.');
+            process.exitCode = 1;
+          }
+          NODE
           [[ -s coverage.txt ]] || { printf 'Coverage unavailable\n' > coverage-unavailable.txt; status=1; }
           if [[ -d "$GITHUB_WORKSPACE/.git" ]]; then
             git -C "$GITHUB_WORKSPACE" diff --exit-code -- . ':(exclude)web/dist/index.html' > source-post-test.diff 2> source-post-test.stderr || status=1
@@ -285,10 +413,10 @@ jobs:
         timeout-minutes: 5
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: d6ee-native-late-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: d6ee-full-package-isolation-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/native-late-failure-evidence/*
-            !${{ runner.temp }}/native-late-failure-evidence/home
+            ${{ runner.temp }}/full-package-isolation-evidence/*
+            !${{ runner.temp }}/full-package-isolation-evidence/home
           if-no-files-found: error
           retention-days: 7
           compression-level: 1
