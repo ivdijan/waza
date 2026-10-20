@@ -142,7 +142,12 @@ function validCollection(value: unknown): value is ReleaseCollection {
   if (d.accepted === true && record(d.native) &&
       (!Array.isArray(d.native.attempts) || d.native.attempts.length === 0 ||
         !d.native.attempts.every((attempt: NativeAttempt) =>
-          attempt.category === "behavioral" && ["passed", "failed"].includes(attempt.status)))) return false;
+          attempt.category === "behavioral" && ["passed", "failed"].includes(attempt.status) &&
+          attempt.output_availability === "available" && attempt.error === "" &&
+          ["construction", "initialize", "execute", "grade", "shutdown"].every((name) => {
+            const phase = attempt.lifecycle[name];
+            return phase?.state === "completed" && (phase.reason === undefined || phase.reason === "");
+          })))) return false;
   if (d.kind !== "waza.release-decision-view" || d.version !== "1.0") {
     throw new Error("Unsupported release decision; not passed.");
   }

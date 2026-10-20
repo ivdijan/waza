@@ -3,6 +3,148 @@ import { readFile } from "node:fs/promises";
 import { nativeReleaseCollections, nativeScenarios } from "./fixtures/native-release-data";
 import { parseCSV } from "./helpers/csv";
 
+for (const phase of ["construction", "initialize", "execute", "grade", "shutdown"] as const) {
+  for (const state of ["completed", "completed-empty-reason", "failed", "not_attempted", "cancelled",
+    "missing", "completed-with-reason"] as const) {
+    test(`accepted native lifecycle ${phase}: ${state}`, async ({ page }) => {
+      const collections = await nativeReleaseCollections("accepted");
+      const collection = collections[0];
+      const attempts = collection?.decision.native?.attempts;
+      const first = attempts?.[0];
+      if (!collection || !attempts || !first) throw new Error("Producer fixture must contain native evidence.");
+      expect(collection.decision.accepted).toBe(true);
+      expect(attempts).toHaveLength(16);
+      const original = structuredClone(first);
+      const keys = structuredClone(attempts.map((attempt) => attempt.key));
+      expect(first.lifecycle[phase]).toEqual({ state: "completed" });
+      if (state === "missing") {
+        delete first.lifecycle[phase];
+      } else if (state === "completed-empty-reason") {
+        first.lifecycle[phase] = { state: "completed", reason: "" };
+      } else if (state === "completed-with-reason") {
+        first.lifecycle[phase] = { state: "completed", reason: "Contradictory lifecycle failure." };
+      } else if (state === "failed") {
+        first.lifecycle[phase] = { state };
+      } else if (state !== "completed") {
+        first.lifecycle[phase] = { state, reason: "Lifecycle prerequisite did not complete." };
+      }
+      if (state !== "completed") expect(first).not.toEqual(original);
+      expect(attempts.map((attempt) => attempt.key)).toEqual(keys);
+      expect(first.status).toBe(original.status);
+      expect(first.category).toBe(original.category);
+      expect(Object.fromEntries(Object.entries(first.lifecycle).filter(([name]) => name !== phase))).toEqual(
+        Object.fromEntries(Object.entries(original.lifecycle).filter(([name]) => name !== phase)),
+      );
+      for (const arm of ["baseline", "candidate"] as const) {
+        expect(attempts.filter((attempt) => attempt.key.arm === arm)).toHaveLength(8);
+        expect(collection.decision.accounting[arm]?.complete_attempts).toBe(8);
+      }
+      await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+      await page.goto("/#/release");
+      if (state === "completed" || state === "completed-empty-reason") {
+        await expect(page.getByRole("alert")).toHaveCount(0);
+        await expect(page.getByText("Selected policy: PASSED", { exact: true })).toBeVisible();
+        await expect(page.getByRole("region", { name: "Native attempt observations", exact: true }).locator("tbody tr")).toHaveCount(16);
+        const downloadEvent = page.waitForEvent("download");
+        await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
+        const path = await (await downloadEvent).path();
+        expect(path).not.toBeNull();
+        expect(JSON.parse(await readFile(path!, "utf8"))).toEqual(collection);
+      } else {
+        await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
+        await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toHaveCount(0);
+      }
+    });
+  }
+}
+
+for (const status of ["passed", "failed"] as const) {
+  for (const mutation of ["available-output", "empty-output", "unavailable-output", "nonempty-attempt-error",
+    "empty-attempt-error", "absent-collection-error", "empty-collection-error", "absent-attempt-error"] as const) {
+    test(`accepted native behavioral ${status} response admission: ${mutation}`, async ({ page }) => {
+      const collections = await nativeReleaseCollections("accepted");
+      const collection = collections[0];
+      const attempts = collection?.decision.native?.attempts;
+      const first = attempts?.[0];
+      if (!collection || !attempts || !first) throw new Error("Producer fixture must contain native evidence.");
+      expect(collection.decision.accepted).toBe(true);
+      expect(attempts).toHaveLength(16);
+      const keys = structuredClone(attempts.map((attempt) => attempt.key));
+      if (status === "failed") {
+        const source = await nativeReleaseCollections("retry");
+        const failed = source[0]?.decision.native?.attempts?.[0];
+        if (!failed) throw new Error("Producer fixture must contain failed behavioral evidence.");
+        expect(failed.status).toBe("failed");
+        expect(failed.category).toBe("behavioral");
+        attempts[0] = { ...failed, key: first.key };
+      }
+      const attempt = attempts[0]!;
+      const original = structuredClone(attempt);
+      expect(attempt.error).toBe("");
+      expect(attempt.output_availability).toBe("available");
+      expect(attempt.output).not.toBe("");
+      expect(collection.error).toBeUndefined();
+      if (mutation === "empty-output") attempt.output = "";
+      if (mutation === "unavailable-output") {
+        attempt.output_availability = "unavailable";
+        delete attempt.output;
+      }
+      if (mutation === "nonempty-attempt-error") attempt.error = "Execution failed but behavioral acceptance was retained.";
+      if (mutation === "empty-attempt-error") attempt.error = "";
+      if (mutation === "absent-collection-error") delete collection.error;
+      if (mutation === "empty-collection-error") collection.error = "";
+      if (mutation === "absent-attempt-error") expect(Reflect.deleteProperty(attempt, "error")).toBe(true);
+      expect(attempts.map((entry) => entry.key)).toEqual(keys);
+      expect(attempt.status).toBe(status);
+      expect(attempt.category).toBe("behavioral");
+      expect(attempt.lifecycle).toEqual(original.lifecycle);
+      for (const arm of ["baseline", "candidate"] as const) {
+        expect(attempts.filter((entry) => entry.key.arm === arm)).toHaveLength(8);
+        expect(collection.decision.accounting[arm]?.complete_attempts).toBe(8);
+      }
+      await page.route(/\/api\/release-collections$/, (route) => route.fulfill({ json: collections }));
+      await page.goto("/#/release");
+      if (["unavailable-output", "nonempty-attempt-error", "absent-attempt-error"].includes(mutation)) {
+        await expect(page.getByRole("alert")).toHaveText("Invalid release decision view; not passed.");
+        await expect(page.getByText("Selected policy: PASSED", { exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Export decision JSON", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Export native attempts CSV", exact: true })).toHaveCount(0);
+      } else {
+        await expect(page.getByRole("alert")).toHaveCount(0);
+        await expect(page.getByText("Selected policy: PASSED", { exact: true })).toBeVisible();
+        const observations = page.getByRole("region", { name: "Native attempt observations", exact: true });
+        await expect(observations.locator("tbody tr")).toHaveCount(16);
+        if (mutation === "empty-output") {
+          const row = observations.locator("tbody tr").first();
+          await row.locator("summary").filter({ hasText: /^Actual output/ }).click();
+          await expect(row.locator("pre")).toHaveText("(empty output)");
+        }
+        const jsonEvent = page.waitForEvent("download");
+        await page.getByRole("button", { name: "Export decision JSON", exact: true }).click();
+        const jsonPath = await (await jsonEvent).path();
+        expect(jsonPath).not.toBeNull();
+        expect(JSON.parse(await readFile(jsonPath!, "utf8"))).toEqual(collection);
+        const csvEvent = page.waitForEvent("download");
+        await page.getByRole("button", { name: "Export native attempts CSV", exact: true }).click();
+        const csvPath = await (await csvEvent).path();
+        expect(csvPath).not.toBeNull();
+        const [headers, ...rows] = parseCSV(await readFile(csvPath!, "utf8"));
+        expect(headers).toBeDefined();
+        if (!headers) throw new Error("CSV header missing.");
+        expect(rows).toHaveLength(16);
+        for (const [name, expected] of [["Output availability", "available"], ["Output present", "true"],
+          ["Output", attempt.output], ["Error", ""], ["Status", status]] as const) {
+          const column = headers.indexOf(name);
+          expect(column).toBeGreaterThanOrEqual(0);
+          expect(rows[0]?.[column]).toBe(expected);
+        }
+      }
+    });
+  }
+}
+
 for (const attempts of [null, [], "partial" as const]) {
   test(`accepted native decision rejects missing observations ${JSON.stringify(attempts)}`, async ({ page }) => {
     const collections = await nativeReleaseCollections("accepted");
@@ -312,7 +454,7 @@ test("native failed lifecycle retains its reason and unattempted prerequisites",
   );
 });
 
-for (const scenario of ["accepted", "retry", "initialize", "unknown-usage", "unknown-budget", "reached-budget"] as const) {
+for (const scenario of ["accepted", "carriage-return", ...nativeScenarios] as const) {
   test(`native ${scenario} JSON and CSV downloads preserve exact policy, attempts and usage`, async ({ page }) => {
     const collections = await nativeReleaseCollections(scenario);
     const collection = collections[0];
