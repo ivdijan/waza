@@ -1,6 +1,7 @@
 package releasepolicy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/microsoft/waza/internal/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -151,6 +153,70 @@ func TestRetainedSelectedDecisionRootBindsSelectedPolicy(t *testing.T) {
 	require.ErrorContains(t, err, "selected policy identity differs")
 	require.False(t, decision.Accepted)
 	require.Equal(t, "mismatched", decision.Compatibility.State)
+}
+
+func TestRetainedCoreDecisionRootBindsOriginalPolicyIdentity(t *testing.T) {
+	policy := testPolicy(t, 8)
+	policy.CollectionProfile = NativeCollectionProfile
+	policy = sealTestPolicy(t, policy)
+	directory := authoredRootCollection(t, policy, true)
+	original, err := os.ReadFile(filepath.Join(directory, "policy.json"))
+	require.NoError(t, err)
+	require.NoError(t, os.Rename(filepath.Join(directory, "policy.json"), filepath.Join(directory, "core-policy.json")))
+	root, err := os.OpenRoot(directory)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+	for _, tc := range []struct {
+		name     string
+		selected models.EvidenceDigest
+	}{
+		{"matching", policy.Digest},
+		{"wrong", testDigest(t, "different admitted envelope")},
+		{"missing", models.EvidenceDigest{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision, err := ReadCoreDecisionRootContext(t.Context(), root, tc.selected)
+			if tc.name == "matching" {
+				require.NoError(t, err)
+				require.True(t, decision.Accepted)
+				return
+			}
+			require.ErrorContains(t, err, "selected policy identity differs")
+			require.False(t, decision.Accepted)
+			require.Equal(t, "mismatched", decision.Compatibility.State)
+		})
+	}
+	for _, wire := range []string{"omitted", "null", "wrong type"} {
+		t.Run(wire, func(t *testing.T) {
+			object, err := objectJSON(original)
+			require.NoError(t, err)
+			switch wire {
+			case "omitted":
+				delete(object, "requirements")
+			case "null":
+				object["requirements"] = nil
+			case "wrong type":
+				object["requirements"] = "not an object"
+			}
+			raw, err := SealJSON(object)
+			require.NoError(t, err)
+			var selected struct {
+				Digest models.EvidenceDigest `json:"digest"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &selected))
+			require.NoError(t, os.WriteFile(filepath.Join(directory, "core-policy.json"), raw, 0o600))
+			decision, err := ReadCoreDecisionRootContext(t.Context(), root, selected.Digest)
+			require.Error(t, err, "the selected identity must not replace original wire admission")
+			require.False(t, decision.Accepted)
+			require.Equal(t, "invalid", decision.Compatibility.State)
+		})
+	}
+	var whitespace bytes.Buffer
+	require.NoError(t, json.Indent(&whitespace, original, "", "  "))
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "core-policy.json"), whitespace.Bytes(), 0o600))
+	decision, err := ReadCoreDecisionRootContext(t.Context(), root, policy.Digest)
+	require.NoError(t, err)
+	require.True(t, decision.Accepted, "original JSON-v1 identity is not a source-byte identity")
 }
 
 func TestRetainedDecisionRootInvalidAndCancellation(t *testing.T) {

@@ -137,7 +137,7 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 	if err := verifyNativeCapture(ctx, native, policy, capture, captured); err != nil {
 		return decision, err
 	}
-	coreDecision, coreErr := releasepolicy.ReadCoreDecisionRootContext(ctx, root)
+	coreDecision, coreErr := releasepolicy.ReadCoreDecisionRootContext(ctx, root, policy.Digest)
 	coreDecision.Native = decision.Native
 	decision = coreDecision
 	var stopped *nativeStop

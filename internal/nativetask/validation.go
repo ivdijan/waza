@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	copilot "github.com/github/copilot-sdk/go"
+	"github.com/microsoft/waza/internal/execution"
 	"github.com/microsoft/waza/internal/jsonutil"
 	"github.com/microsoft/waza/internal/models"
 	"github.com/microsoft/waza/internal/releasepolicy"
@@ -469,27 +471,34 @@ func validateObservedModels(requested string, observations ...[]string) error {
 
 func validateCanonicalEventModels(requested string, observed []string, events []json.RawMessage) error {
 	for _, event := range events {
-		value, err := jsonutil.Parse(event)
-		if err != nil {
+		var wire struct {
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
+		}
+		if err := models.ValidateNativeJSONKeys(event, wire); err != nil {
 			return err
 		}
-		object, ok := value.(map[string]any)
-		if !ok || object["type"] != "assistant.message" {
+		if err := json.Unmarshal(event, &wire); err != nil {
+			return fmt.Errorf("decoding native canonical event models: %w", err)
+		}
+		var decoded copilot.SessionEvent
+		if err := json.Unmarshal(event, &decoded); err != nil {
+			return fmt.Errorf("decoding native canonical event models: %w", err)
+		}
+		observation := execution.ObserveSessionEventModels(decoded)
+		if observation.EventsObserved == 0 {
 			continue
 		}
-		data, ok := object["data"].(map[string]any)
-		if !ok {
-			continue
+		if err := models.ValidateNativeJSONKeys(wire.Data, decoded.Data); err != nil {
+			return err
 		}
-		model, ok := data["model"].(string)
-		if !ok {
-			continue
-		}
-		if model != requested {
-			return fmt.Errorf("native canonical event model differs from fixed requested model")
-		}
-		if !slices.Contains(observed, model) {
-			return fmt.Errorf("native canonical event model is absent from declared event observations")
+		for _, model := range observation.Models {
+			if model != requested {
+				return fmt.Errorf("native canonical event model differs from fixed requested model")
+			}
+			if !slices.Contains(observed, model) {
+				return fmt.Errorf("native canonical event model is absent from declared event observations")
+			}
 		}
 	}
 	return nil

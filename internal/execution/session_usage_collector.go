@@ -339,6 +339,26 @@ func (s *SessionUsageCollector) EventModelObservation() SessionEventModelObserva
 }
 
 func (s *SessionUsageCollector) observeEventModels(event copilot.SessionEvent) {
+	observation := ObserveSessionEventModels(event)
+	s.modelEventsObserved += observation.EventsObserved
+	if observation.EventsObserved == 0 {
+		return
+	}
+	if !observation.Complete {
+		s.eventModelsIncomplete = true
+	}
+	for _, model := range observation.Models {
+		if s.eventModels == nil {
+			s.eventModels = make(map[string]bool)
+		}
+		s.eventModels[model] = true
+	}
+}
+
+// ObserveSessionEventModels extracts the collector's supported model observations
+// from one SDK event without collecting usage or inferring missing identities.
+// Retained native evidence uses this same contract to reconcile canonical events.
+func ObserveSessionEventModels(event copilot.SessionEvent) SessionEventModelObservation {
 	var ids []*string
 	switch data := event.Data.(type) {
 	case *copilot.AssistantUsageData:
@@ -484,20 +504,20 @@ func (s *SessionUsageCollector) observeEventModels(event copilot.SessionEvent) {
 			ids = append(ids, data.Model)
 		}
 	default:
-		return
+		return SessionEventModelObservation{}
 	}
-	s.modelEventsObserved++
-	if len(ids) == 0 {
-		s.eventModelsIncomplete = true
-	}
+	result := SessionEventModelObservation{EventsObserved: 1, Complete: len(ids) > 0}
+	models := map[string]bool{}
 	for _, id := range ids {
 		if id == nil || !observedModel(*id) {
-			s.eventModelsIncomplete = true
+			result.Complete = false
 			continue
 		}
-		if s.eventModels == nil {
-			s.eventModels = make(map[string]bool)
-		}
-		s.eventModels[*id] = true
+		models[*id] = true
 	}
+	for model := range models {
+		result.Models = append(result.Models, model)
+	}
+	sort.Strings(result.Models)
+	return result
 }

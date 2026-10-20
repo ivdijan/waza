@@ -595,6 +595,140 @@ func recordTapeBytes(t *testing.T, admitted *Admitted, raw []byte) ([]byte, []by
 	return events, append(bytes.Clone(raw), '\n')
 }
 
+func TestPublicTapeReaderReconcilesAllCanonicalModelObservations(t *testing.T) {
+	events := []struct {
+		name string
+		raw  string
+	}{
+		{"usage", `{"type":"assistant.usage","data":{"model":"MODEL"}}`},
+		{"usage billing", `{"type":"assistant.usage","data":{"model":"observed-test-model","copilotUsage":{"model":"MODEL"}}}`},
+		{"usage token billing", `{"type":"assistant.usage","data":{"model":"observed-test-model","copilotUsage":{"tokenDetails":[{"model":"MODEL"}]}}}`},
+		{"turn start", `{"type":"assistant.turn_start","data":{"model":"MODEL"}}`},
+		{"turn end", `{"type":"assistant.turn_end","data":{"model":"MODEL"}}`},
+		{"turn retry", `{"type":"assistant.turn_retry","data":{"model":"MODEL"}}`},
+		{"model call start", `{"type":"model.call_start","data":{"model":"MODEL"}}`},
+		{"model call failure", `{"type":"model.call_failure","data":{"model":"MODEL"}}`},
+		{"session start", `{"type":"session.start","data":{"selectedModel":"MODEL"}}`},
+		{"session resume", `{"type":"session.resume","data":{"selectedModel":"MODEL"}}`},
+		{"session change new", `{"type":"session.model_change","data":{"newModel":"MODEL"}}`},
+		{"session change previous", `{"type":"session.model_change","data":{"newModel":"observed-test-model","previousModel":"MODEL"}}`},
+		{"session deselected", `{"type":"session.model_deselected","data":{"previousModel":"MODEL"}}`},
+		{"shutdown current", `{"type":"session.shutdown","data":{"currentModel":"MODEL"}}`},
+		{"shutdown metrics", `{"type":"session.shutdown","data":{"modelMetrics":{"MODEL":{}}}}`},
+		{"shutdown agent metrics", `{"type":"session.shutdown","data":{"agentMetrics":{"agent":{"modelMetrics":{"MODEL":{}}}}}}`},
+		{"compaction start", `{"type":"session.compaction_start","data":{"model":"MODEL"}}`},
+		{"compaction complete", `{"type":"session.compaction_complete","data":{"compactionTokensUsed":{"model":"MODEL"}}}`},
+		{"compaction billing", `{"type":"session.compaction_complete","data":{"compactionTokensUsed":{"model":"observed-test-model","copilotUsage":{"model":"MODEL"}}}}`},
+		{"compaction token billing", `{"type":"session.compaction_complete","data":{"compactionTokensUsed":{"model":"observed-test-model","copilotUsage":{"tokenDetails":[{"model":"MODEL"}]}}}}`},
+		{"fusion started", `{"type":"assistant.fusion_phase_started","data":{"model":"MODEL"}}`},
+		{"fusion completed", `{"type":"assistant.fusion_phase_completed","data":{"model":"MODEL"}}`},
+		{"fusion failed", `{"type":"assistant.fusion_phase_failed","data":{"model":"MODEL"}}`},
+		{"subagent configured", `{"type":"subagent.configured","data":{"model":"MODEL"}}`},
+		{"subagent started", `{"type":"subagent.started","data":{"model":"MODEL"}}`},
+		{"subagent completed", `{"type":"subagent.completed","data":{"model":"MODEL"}}`},
+		{"subagent failed", `{"type":"subagent.failed","data":{"model":"MODEL"}}`},
+		{"agent interrupted", `{"type":"agent.interrupted","data":{"model":"MODEL"}}`},
+		{"tools updated", `{"type":"session.tools_updated","data":{"model":"MODEL"}}`},
+		{"tool start", `{"type":"tool.execution_start","data":{"model":"MODEL"}}`},
+		{"tool complete", `{"type":"tool.execution_complete","data":{"model":"MODEL"}}`},
+		{"skill invoked", `{"type":"skill.invoked","data":{"model":"MODEL"}}`},
+		{"exit plan", `{"type":"exit_plan_mode.requested","data":{"model":"MODEL"}}`},
+	}
+	for _, event := range events {
+		t.Run(event.name, func(t *testing.T) {
+			for _, mode := range []string{"matching", "mismatch", "undeclared", "operational", "private"} {
+				t.Run(mode, func(t *testing.T) {
+					_, admitted, _, _, record := collectionFixture(t)
+					if mode == "private" {
+						_, _, admitted, record = fixture(t)
+					}
+					record.EventModels = EventModels{Models: []string{"observed-test-model"}, EventsObserved: 2, Complete: true}
+					model := "observed-test-model"
+					if mode == "mismatch" || mode == "operational" || mode == "private" {
+						model = "substituted-model"
+					}
+					if mode == "undeclared" {
+						record.EventModels = EventModels{Models: []string{}}
+					}
+					if mode == "operational" {
+						record = operational(record, "Observed SDK model differs from fixed requested model.")
+					}
+					matching := strings.ReplaceAll(event.raw, "MODEL", "observed-test-model")
+					mutated := strings.ReplaceAll(event.raw, "MODEL", model)
+					var sdkEvent copilot.SessionEvent
+					require.NoError(t, json.Unmarshal([]byte(mutated), &sdkEvent))
+					collector := execution.NewSessionUsageCollector()
+					collector.On(sdkEvent)
+					require.Contains(t, collector.EventModelObservation().Models, model,
+						"fixture must exercise a model observation actually supported by the collector")
+					if model != "observed-test-model" {
+						require.NotEqual(t, matching, mutated, "change only the selected canonical model field")
+					}
+					record.Response.CanonicalEvents = append(record.Response.CanonicalEvents, json.RawMessage(mutated))
+					raw := encoded(t, record)
+					tape, rows := recordTapeBytes(t, admitted, raw)
+					var prefix *Prefix
+					var err error
+					if mode == "private" {
+						prefix, err = InspectPrefix(t.Context(), tape, rows, []*Admitted{admitted})
+					} else {
+						prefix, err = InspectCollectionPrefix(t.Context(), tape, rows, []*Admitted{admitted})
+					}
+					if mode == "mismatch" || mode == "undeclared" {
+						want := "canonical event model differs from fixed requested model"
+						if mode == "undeclared" {
+							want = "canonical event model is absent from declared event observations"
+						}
+						require.ErrorContains(t, err, want)
+						require.Nil(t, prefix)
+						return
+					}
+					require.NoError(t, err)
+					require.Len(t, prefix.Records, 1)
+					require.Equal(t, record.Response.CanonicalEvents, prefix.Records[0].Response.CanonicalEvents)
+					require.Equal(t, record.Summary.Category, prefix.Records[0].Summary.Category)
+				})
+			}
+		})
+	}
+}
+
+func TestPublicTapeReaderCanonicalModelAvailability(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		wantErr string
+	}{
+		{"absent", `{"type":"assistant.turn_start","data":{}}`, ""},
+		{"null model", `{"type":"assistant.turn_start","data":{"model":null}}`, ""},
+		{"null data", `{"type":"assistant.turn_start","data":null}`, ""},
+		{"unknown model", `{"type":"assistant.turn_start","data":{"model":"unknown"}}`, ""},
+		{"malformed model", `{"type":"assistant.turn_start","data":{"model":42}}`, "decoding native canonical event models"},
+		{"malformed nested model", `{"type":"assistant.usage","data":{"model":"observed-test-model","copilotUsage":{"tokenDetails":[{"model":42}]}}}`, "decoding native canonical event models"},
+		{"type shadow", `{"type":"assistant.turn_start","Type":"session.info","data":{"model":"substituted-model"}}`, "native JSON key"},
+		{"data shadow", `{"type":"assistant.turn_start","data":{"model":"substituted-model"},"Data":{"model":"observed-test-model"}}`, "native JSON key"},
+		{"model shadow", `{"type":"assistant.turn_start","data":{"model":"substituted-model","Model":"observed-test-model"}}`, "native JSON key"},
+		{"nested model shadow", `{"type":"assistant.usage","data":{"model":"observed-test-model","copilotUsage":{"model":"substituted-model","Model":"observed-test-model"}}}`, "native JSON key"},
+		{"unrelated event", `{"type":"session.info","data":{"message":"info","model":"other-model"}}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, admitted, _, _, record := collectionFixture(t)
+			record.EventModels = EventModels{Models: []string{"observed-test-model"}, EventsObserved: 1}
+			record.Response.CanonicalEvents = append(record.Response.CanonicalEvents, json.RawMessage(tc.raw))
+			tape, rows := recordTapeBytes(t, admitted, encoded(t, record))
+			prefix, err := InspectCollectionPrefix(t.Context(), tape, rows, []*Admitted{admitted})
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.Nil(t, prefix)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, prefix.Records, 1)
+			require.Equal(t, record.Response.CanonicalEvents, prefix.Records[0].Response.CanonicalEvents)
+		})
+	}
+}
+
 func TestFinalAccountingZeroVersusMissingAndPartial(t *testing.T) {
 	_, _, admitted, r := fixture(t)
 	zero := 0.0

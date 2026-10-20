@@ -58,16 +58,16 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, selected *model
 	}, selected)
 }
 
-// ReadCoreDecisionRootContext verifies the unchanged core artifacts underneath
-// a separately versioned envelope. The envelope owner must verify its stronger
-// evidence contract before publishing this decision.
-func ReadCoreDecisionRootContext(ctx context.Context, root *os.Root) (Decision, error) {
+// ReadCoreDecisionRootContext verifies core artifacts against the policy identity
+// admitted by a separately versioned envelope. The envelope owner must verify
+// its stronger evidence contract before publishing this decision.
+func ReadCoreDecisionRootContext(ctx context.Context, root *os.Root, selected models.EvidenceDigest) (Decision, error) {
 	return readDecisionProfile(ctx, func(name string) ([]byte, error) {
 		if name == "policy.json" {
 			name = "core-policy.json"
 		}
 		return readArtifactRootContext(ctx, root, name)
-	}, nil, true)
+	}, &selected, true)
 }
 
 func readOwnedDecision(ctx context.Context, directory string, selected *models.EvidenceDigest) (d Decision, err error) {

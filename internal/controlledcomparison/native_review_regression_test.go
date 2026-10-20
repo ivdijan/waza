@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -287,6 +288,140 @@ func TestReadSelectedDecisionRejectsMockCollectionReplacedAfterSelection(t *test
 	require.NoError(t, err)
 	require.Equal(t, "compatible", matching.Compatibility.State)
 	require.Equal(t, "inconclusive", matching.Statistics.State)
+}
+
+type replaceDuringCoreAssessmentContext struct {
+	context.Context
+	replace, restore   func()
+	replaced, restored bool
+}
+
+func (c *replaceDuringCoreAssessmentContext) Err() error {
+	var pcs [64]uintptr
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(1, pcs[:])])
+	inCore, inNativeRead := false, false
+	for {
+		frame, more := frames.Next()
+		inCore = inCore || strings.HasSuffix(frame.Function, "/releasepolicy.readDecisionProfile")
+		inNativeRead = inNativeRead || strings.HasSuffix(frame.Function, "/controlledcomparison.nativeArtifactWithOpener")
+		if !more {
+			break
+		}
+	}
+	if inCore && !c.replaced {
+		c.replace()
+		c.replaced = true
+	}
+	if !inCore && inNativeRead && c.replaced && !c.restored {
+		c.restore()
+		c.restored = true
+	}
+	return c.Context.Err()
+}
+
+func TestReadSelectedDecisionBindsCorePolicyConsumedByAssessment(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("native durable creation requires Linux or macOS")
+	}
+	source := nativeFixture(t, "fixed-model")
+	design := nativeDesign()
+	design.Margin = "0.01"
+	design.Independence.Assessment = "justified"
+	design.Independence.Justification = "Independent synthetic clusters exercise policy admission, not live quality."
+	design.Clusters = nil
+	tasks := []string{"task.yaml"}
+	for i := range 8 {
+		id := fmt.Sprintf("task-%d", i)
+		design.Clusters = append(design.Clusters, releasepolicy.Cluster{ID: fmt.Sprintf("cluster-%d", i), Weight: "0.125",
+			Tasks: []releasepolicy.PlannedTask{{ID: id, Weight: "1", TrialOrdinals: []int{1}}}})
+		if i > 0 {
+			name := id + ".yaml"
+			tasks = append(tasks, name)
+			require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(source.EvalPath), name),
+				[]byte(fmt.Sprintf("id: %s\nname: native\ngolden: true\ninputs:\n  prompt: say hello\n", id)), 0o600))
+		}
+	}
+	eval, err := os.ReadFile(source.EvalPath)
+	require.NoError(t, err)
+	require.Contains(t, string(eval), "tasks: [task.yaml]")
+	require.NoError(t, os.WriteFile(source.EvalPath, bytes.Replace(eval, []byte("tasks: [task.yaml]"),
+		[]byte("tasks: ["+strings.Join(tasks, ", ")+"]"), 1), 0o600))
+	policyA, err := controlledcomparison.PlanNative(t.Context(), source, source, design, nativeRequirements(), nil)
+	require.NoError(t, err)
+	policyA = fixedNativePolicy(t, policyA)
+	design.Margin = "1"
+	policyB, err := controlledcomparison.PlanNative(t.Context(), source, source, design, nativeRequirements(), nil)
+	require.NoError(t, err)
+	policyB = fixedNativePolicy(t, policyB)
+	_, coreA, _, err := controlledcomparison.DecodeNativePolicy(policyA)
+	require.NoError(t, err)
+	_, coreB, _, err := controlledcomparison.DecodeNativePolicy(policyB)
+	require.NoError(t, err)
+	require.NotEqual(t, coreA.Digest, coreB.Digest)
+	require.Equal(t, "0.01", coreA.Design.Margin.String())
+	require.Equal(t, "1", coreB.Design.Margin.String())
+	collectionA, collectionB := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
+	calls := 0
+	for _, collection := range []struct {
+		path, statistics string
+		policy           []byte
+		accepted         bool
+	}{{collectionA, "inconclusive", policyA, false}, {collectionB, "noninferiority", policyB, true}} {
+		require.NoError(t, controlledcomparison.CollectNativeWithOptions(t.Context(), collection.policy, source, source, collection.path,
+			controlledcomparison.NativeCollectorOptions{NewCopilotClient: nativeFactory(t, &calls)}))
+		decision, err := controlledcomparison.ReadSelectedDecision(t.Context(), collection.path, collection.policy)
+		require.NoError(t, err)
+		require.Equal(t, collection.accepted, decision.Accepted, "each alternative core set is independently valid")
+		require.Equal(t, collection.statistics, decision.Statistics.State)
+		require.Len(t, decision.Native.Attempts, 16)
+	}
+	require.Equal(t, 32, calls)
+
+	coreNames := []string{"core-policy.json", "journal.json", "journal.ndjson"}
+	for _, arm := range []string{"baseline", "candidate"} {
+		for _, suffix := range []string{".begin.json", ".final.json", ".result-binding.json", ".results.json"} {
+			coreNames = append(coreNames, arm+suffix)
+		}
+	}
+	readSet := func(directory string) map[string][]byte {
+		t.Helper()
+		data := map[string][]byte{}
+		for _, name := range coreNames {
+			raw, err := os.ReadFile(filepath.Join(directory, name))
+			require.NoError(t, err)
+			data[name] = raw
+		}
+		return data
+	}
+	writeSet := func(data map[string][]byte) {
+		t.Helper()
+		for _, name := range coreNames {
+			require.NoError(t, os.WriteFile(filepath.Join(collectionA, name), data[name], 0o600))
+		}
+		require.Equal(t, data, readSet(collectionA), "prove actual persisted core artifact bytes at the boundary")
+		outer, err := os.ReadFile(filepath.Join(collectionA, "policy.json"))
+		require.NoError(t, err)
+		require.Equal(t, policyA, outer, "the selected envelope is never replaced")
+	}
+	original, replacement := readSet(collectionA), readSet(collectionB)
+	require.NotEqual(t, original["core-policy.json"], replacement["core-policy.json"])
+	ctx := &replaceDuringCoreAssessmentContext{Context: t.Context(),
+		replace: func() { writeSet(replacement) },
+		restore: func() { writeSet(original) }}
+	decision, err := controlledcomparison.ReadSelectedDecision(ctx, collectionA, policyA)
+	require.True(t, ctx.replaced, "replace only inside the actual core policy assessment read")
+	require.True(t, ctx.restored, "restore before native replay and final row reconciliation")
+	require.Equal(t, original, readSet(collectionA))
+	t.Logf("core A margin=%s digest=%s; temporary B margin=%s digest=%s; replaced=%t restored=%t; returned accepted=%t statistics=%s error=%v",
+		coreA.Design.Margin, coreA.Digest.SHA256, coreB.Design.Margin, coreB.Digest.SHA256,
+		ctx.replaced, ctx.restored, decision.Accepted, decision.Statistics.State, err)
+	require.ErrorContains(t, err, "selected policy identity differs from the precollection commitment")
+	require.False(t, decision.Accepted, "a looser temporary core policy must never decide acceptance")
+	require.Equal(t, "invalid", decision.Compatibility.State)
+	clean, err := controlledcomparison.ReadSelectedDecision(t.Context(), collectionA, policyA)
+	require.NoError(t, err)
+	require.False(t, clean.Accepted)
+	require.Equal(t, "inconclusive", clean.Statistics.State)
 }
 
 func TestNativeTerminalPolicyAndLateStop(t *testing.T) {
