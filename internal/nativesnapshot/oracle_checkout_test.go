@@ -30,6 +30,11 @@ func TestPinnedOriginalFixturesPreserveCheckoutBytes(t *testing.T) {
 		"internal/nativesnapshot/testdata/g2-original/nativesnapshot-snapshot.go.original",
 		"internal/nativesnapshot/testdata/g2-original/orchestration-request_files.go.original",
 		"internal/nativesnapshot/testdata/g2-original/orchestration-runner.go.original",
+		"internal/testutil/readeroracle/testdata/15c/nativesnapshot-collection.go.original",
+		"internal/testutil/readeroracle/testdata/15c/jsonutil-json.go.original",
+		"internal/testutil/readeroracle/testdata/15c/models-native_evidence.go.original",
+		"internal/testutil/readeroracle/testdata/15c/controlledcomparison-native_read.go.original",
+		"internal/testutil/readeroracle/testdata/15c/webapi-release.go.original",
 	}
 	for _, mode := range []string{"true", "false"} {
 		t.Run("autocrlf_"+mode, func(t *testing.T) {

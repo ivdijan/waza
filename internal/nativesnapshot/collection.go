@@ -249,11 +249,24 @@ func ReadCollectionCapture(ctx context.Context, raw []byte) (*CollectionCapture,
 	if err := models.ValidateNativeJSONKeys(strictRaw, collectionCaptureWire{}); err != nil {
 		return nil, err
 	}
-	var wire collectionCaptureWire
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil {
-		return nil, err
+	decode := func(data []byte) (collectionCaptureWire, error) {
+		var wire collectionCaptureWire
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.DisallowUnknownFields()
+		err := decoder.Decode(&wire)
+		return wire, err
+	}
+	wire, decodeErr := decode(strictRaw)
+	if decodeErr == nil && found {
+		decodeErr = json.Unmarshal(raw[blobsStart:blobsEnd], &wire.Blobs)
+	}
+	if decodeErr != nil {
+		// Preserve the original decoder's first error and byte offsets when
+		// separate envelope/blob decoding encounters invalid field values.
+		if _, err := decode(raw); err != nil {
+			return nil, err
+		}
+		return nil, decodeErr
 	}
 	if wire.Kind != "waza.release-native-capture" || wire.Version != "1.0" {
 		return nil, fmt.Errorf("unsupported native capture kind/version")

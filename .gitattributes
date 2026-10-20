@@ -22,3 +22,4 @@ internal/nativesnapshot/testdata/g2-original/nativesnapshot-join.go.original -te
 internal/nativesnapshot/testdata/g2-original/nativesnapshot-snapshot.go.original -text
 internal/nativesnapshot/testdata/g2-original/orchestration-request_files.go.original -text
 internal/nativesnapshot/testdata/g2-original/orchestration-runner.go.original -text
+internal/testutil/readeroracle/testdata/15c/*.original -text
