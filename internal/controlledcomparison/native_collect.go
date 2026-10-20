@@ -59,14 +59,14 @@ func collectNative(ctx context.Context, policyData []byte, baseline, candidate S
 		return err
 	}
 	defer func() { err = errors.Join(err, closeCapture()) }()
-	if err := verifyNativeCapture(ctx, native, policy, capture); err != nil {
+	captureData, err := capture.Marshal(ctx)
+	if err != nil {
+		return err
+	}
+	if err := verifyNativeCapture(ctx, native, policy, capture, captureData); err != nil {
 		return err
 	}
 	if err := capture.Recheck(ctx); err != nil {
-		return err
-	}
-	captureData, err := capture.Marshal(ctx)
-	if err != nil {
 		return err
 	}
 	var tape *nativetask.Tape

@@ -121,7 +121,7 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 	if err != nil {
 		return decision, err
 	}
-	if err := verifyNativeCapture(ctx, native, policy, capture); err != nil {
+	if err := verifyNativeCapture(ctx, native, policy, capture, captured); err != nil {
 		return decision, err
 	}
 	coreDecision, coreErr := releasepolicy.ReadCoreDecisionRootContext(ctx, root)

@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func nativeFixture(t *testing.T, model string) controlledcomparison.Source {
+func nativeFixture(t testing.TB, model string) controlledcomparison.Source {
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "eval.yaml"), []byte(
@@ -61,7 +61,7 @@ func nativeRequirements() releasepolicy.Requirements {
 
 // Production allocates randomly. Fixtures precommit a fixed valid seed before
 // any collection side effect; arm identities are never relabeled after running.
-func fixedNativePolicy(t *testing.T, raw []byte) []byte {
+func fixedNativePolicy(t testing.TB, raw []byte) []byte {
 	t.Helper()
 	native, policy, profile, err := controlledcomparison.DecodeNativePolicy(raw)
 	require.NoError(t, err)
@@ -84,7 +84,7 @@ func fixedNativePolicy(t *testing.T, raw []byte) []byte {
 	return sealed
 }
 
-func nativeFactory(t *testing.T, calls *int, configure ...func(int, *nativeTestClient)) func(*copilot.ClientOptions) execution.CopilotClient {
+func nativeFactory(t testing.TB, calls *int, configure ...func(int, *nativeTestClient)) func(*copilot.ClientOptions) execution.CopilotClient {
 	t.Helper()
 	return func(*copilot.ClientOptions) execution.CopilotClient {
 		*calls++
@@ -104,7 +104,7 @@ func nativeFactory(t *testing.T, calls *int, configure ...func(int, *nativeTestC
 }
 
 type nativeTestClient struct {
-	t               *testing.T
+	t               testing.TB
 	session         *nativeTestSession
 	startErr        error
 	stopErr         error
@@ -151,7 +151,7 @@ func (c *nativeTestClient) ListModels(context.Context) ([]copilot.ModelInfo, err
 }
 
 type nativeTestSession struct {
-	t              *testing.T
+	t              testing.TB
 	id             string
 	handlers       []copilot.SessionEventHandler
 	output         string
@@ -389,6 +389,7 @@ func TestNativeCollectionObservedFailures(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("native durable creation requires Linux or macOS")
 	}
+
 	for _, name := range []string{"retry", "initialize", "execute", "shutdown", "disconnect", "empty-output", "unknown-usage", "unknown-budget", "reached-budget"} {
 		t.Run(name, func(t *testing.T) {
 			baseline, candidate := nativeFixture(t, "fixed-model"), nativeFixture(t, "fixed-model")
@@ -469,5 +470,33 @@ func TestNativeCollectionObservedFailures(t *testing.T) {
 			}
 			assertNativeAPI(t, filepath.Dir(directory), name)
 		})
+	}
+}
+
+// BenchmarkReadSelectedDecisionActualCollectionCapture exercises the complete
+// production reader, including capture digest verification, with admitted test
+// executable bytes rather than a synthetic payload.
+func BenchmarkReadSelectedDecisionActualCollectionCapture(b *testing.B) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		b.Skip("native durable creation requires Linux or macOS")
+	}
+	baseline, candidate := nativeFixture(b, "fixed-model"), nativeFixture(b, "fixed-model")
+	policy, err := controlledcomparison.PlanNative(b.Context(), baseline, candidate, nativeDesign(), nativeRequirements(), nil)
+	require.NoError(b, err)
+	policy = fixedNativePolicy(b, policy)
+	directory := filepath.Join(b.TempDir(), "native")
+	calls := 0
+	require.NoError(b, controlledcomparison.CollectNativeWithOptions(b.Context(), policy, baseline, candidate, directory,
+		controlledcomparison.NativeCollectorOptions{NewCopilotClient: nativeFactory(b, &calls)}))
+	require.Equal(b, 2, calls)
+	raw, err := os.ReadFile(filepath.Join(directory, "native-capture.json"))
+	require.NoError(b, err)
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		decision, err := controlledcomparison.ReadSelectedDecision(b.Context(), directory, policy)
+		require.NoError(b, err)
+		require.NotNil(b, decision.Native)
 	}
 }

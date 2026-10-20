@@ -261,13 +261,16 @@ func PlanNative(ctx context.Context, baseline, candidate Source, design releasep
 	return data, err
 }
 
-func verifyNativeCapture(ctx context.Context, native *NativePolicy, policy *releasepolicy.Policy, capture *nativesnapshot.CollectionCapture) error {
-	raw, err := capture.Marshal(ctx)
-	if err != nil {
-		return err
-	}
-	if releasepolicy.SourceDigest(raw) != native.CaptureDigest {
-		return fmt.Errorf("native source/current configuration differs from precollection capture")
+func verifyNativeCapture(ctx context.Context, native *NativePolicy, policy *releasepolicy.Policy, capture *nativesnapshot.CollectionCapture, raw []byte) error {
+	if len(raw) == 0 || releasepolicy.SourceDigest(raw) != native.CaptureDigest {
+		var err error
+		raw, err = capture.Marshal(ctx)
+		if err != nil {
+			return err
+		}
+		if releasepolicy.SourceDigest(raw) != native.CaptureDigest {
+			return fmt.Errorf("native source/current configuration differs from precollection capture")
+		}
 	}
 	projections, err := capture.Projections(ctx)
 	if err != nil {
