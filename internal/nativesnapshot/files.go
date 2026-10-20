@@ -116,7 +116,13 @@ func same(before, after os.FileInfo) bool {
 		before.Size() == after.Size() && before.ModTime().Equal(after.ModTime())
 }
 
-func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
+func (f *capturedFiles) ReadFile(path string) ([]byte, error) {
+	return f.readFile(path, true)
+}
+
+// readFile records the source without exposing retained bytes. Only readers
+// that consume the contents need a detached return buffer.
+func (f *capturedFiles) readFile(path string, contents bool) (data []byte, err error) {
 	defer func() {
 		if err != nil && f.sticky == nil {
 			f.sticky = err
@@ -128,7 +134,10 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 	}
 	if data, ok := f.data[rel]; ok {
 		f.addRole(rel)
-		return bytes.Clone(data), nil
+		if contents {
+			return bytes.Clone(data), nil
+		}
+		return nil, nil
 	}
 	if f.frozen {
 		return nil, fmt.Errorf("uncaptured input %q", rel)
@@ -217,7 +226,10 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 	f.info[rel] = before
 	*f.total += output.Len()
 	f.addRole(rel)
-	return bytes.Clone(output.Bytes()), nil
+	if contents {
+		return bytes.Clone(output.Bytes()), nil
+	}
+	return nil, nil
 }
 
 func (f *capturedFiles) addRole(path string) {

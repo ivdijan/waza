@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -257,6 +258,165 @@ func TestCollectionCaptureTransferredInventoryMatchesFrozenSource(t *testing.T) 
 			failed, err := CaptureCollection(t.Context(), locations)
 			require.Error(t, err)
 			require.Nil(t, failed)
+		})
+	}
+}
+
+func TestSourceRecordOnlyRetainsOwnedBytes(t *testing.T) {
+	for _, content := range []string{"original", ""} {
+		t.Run(map[bool]string{true: "empty", false: "populated"}[content == ""], func(t *testing.T) {
+			files, base := reader(t, t.Context())
+			path := filepath.Join(base, "input")
+			write(t, base, "input", content)
+			files.role = "executable"
+			for range 2 {
+				data, err := files.readFile(path, false)
+				require.NoError(t, err)
+				require.Nil(t, data, "record-only initial and cached reads must return no buffer")
+				require.Equal(t, len(content), *files.total, "cached reads must not count bytes again")
+			}
+			require.Contains(t, files.data, "input")
+			require.Equal(t, content, string(files.data["input"]))
+			files.role = "request_input"
+			for range 2 {
+				data, err := files.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, content, string(data))
+				if len(data) != 0 {
+					data[0] = '!'
+					require.Equal(t, content, string(files.data["input"]))
+				} else {
+					require.Nil(t, data)
+				}
+			}
+			inventory := files.takeInventory()
+			require.Len(t, inventory, 1)
+			require.Equal(t, content, string(inventory[0].Bytes))
+			require.Equal(t, []string{"executable", "request_input"}, inventory[0].Roles)
+			require.Equal(t, releasepolicy.SourceDigest([]byte(content)), inventory[0].Digest)
+			if content == "" {
+				require.Nil(t, inventory[0].Bytes)
+			}
+			data, err := files.readFile(path, false)
+			require.ErrorContains(t, err, "uncaptured input")
+			require.Nil(t, data)
+			require.ErrorIs(t, files.sticky, err)
+		})
+	}
+}
+
+func TestSourceRecordOnlyPreservesReadFailures(t *testing.T) {
+	for _, name := range []string{"missing", "directory", "source_limit", "total_limit", "cancel", "changed_during_read", "physical_alias"} {
+		t.Run(name, func(t *testing.T) {
+			ctx := &readContext{Context: context.Background(), onCheck: func(int) error { return nil }}
+			files, base := reader(t, ctx)
+			files.role = "executable"
+			write(t, base, "input", "original")
+			want := ""
+			switch name {
+			case "missing":
+				require.NoError(t, os.Remove(filepath.Join(base, "input")))
+			case "directory":
+				require.NoError(t, os.Remove(filepath.Join(base, "input")))
+				require.NoError(t, os.Mkdir(filepath.Join(base, "input"), 0700))
+				want = "not a regular file"
+			case "source_limit":
+				file, err := os.OpenFile(filepath.Join(base, "input"), os.O_WRONLY, 0)
+				require.NoError(t, err)
+				require.NoError(t, file.Truncate(maxExecutableBytes+1))
+				require.NoError(t, file.Close())
+				want = "source limit"
+			case "total_limit":
+				*files.total = maxTotalBytes
+				want = "byte limit"
+			case "cancel":
+				ctx.onCheck = func(int) error { return context.Canceled }
+			case "changed_during_read":
+				ctx.onCheck = func(call int) error {
+					if call == 6 {
+						write(t, base, "input", "different length")
+					}
+					return nil
+				}
+				want = "changed during read"
+			case "physical_alias":
+				require.NoError(t, os.Link(filepath.Join(base, "input"), filepath.Join(base, "alias")))
+				_, err := files.ReadFile(filepath.Join(base, "alias"))
+				require.NoError(t, err)
+				want = "physical source path alias"
+			}
+			data, err := files.readFile(filepath.Join(base, "input"), false)
+			require.Error(t, err)
+			switch name {
+			case "cancel":
+				require.ErrorIs(t, err, context.Canceled)
+			case "missing":
+				require.ErrorIs(t, err, fs.ErrNotExist)
+			default:
+				require.ErrorContains(t, err, want)
+			}
+			require.Nil(t, data)
+			require.NotContains(t, files.data, "input")
+			require.ErrorIs(t, files.sticky, err)
+		})
+	}
+}
+
+func TestCollectionCaptureExecutableRecordOnlyMatchesFrozenSource(t *testing.T) {
+	for _, path := range []string{"evaluator", "baseline/eval.yaml", "baseline/context/a.txt"} {
+		t.Run(path, func(t *testing.T) {
+			base, locations := fixture(t)
+			for arm, location := range locations {
+				location.Executable = path
+				locations[arm] = location
+			}
+			executable, err := os.ReadFile(filepath.Join(base, path))
+			require.NoError(t, err)
+			original := frozenOriginalCapture(t, locations)
+			captured, err := CaptureCollection(t.Context(), locations)
+			require.NoError(t, err)
+			require.Equal(t, original.Canonical, captured.capture.prepared.canonical)
+			require.Equal(t, original.Sources, captured.capture.prepared.sources)
+			projections, err := captured.Projections(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, original.Projection, projections)
+			for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
+				found := false
+				for _, entry := range captured.capture.prepared.sources[arm] {
+					if entry.Path == path {
+						found = true
+						require.Contains(t, entry.Roles, "executable")
+						require.Equal(t, executable, entry.Bytes)
+						require.Equal(t, releasepolicy.SourceDigest(executable), entry.Digest)
+						if arm == releasepolicy.Baseline && path == "baseline/context/a.txt" {
+							require.Contains(t, entry.Roles, "resource")
+						}
+						if arm == releasepolicy.Baseline && path == "baseline/eval.yaml" {
+							require.Contains(t, entry.Roles, "eval")
+						}
+					}
+				}
+				require.True(t, found, "both arms must retain the executable source")
+			}
+			wire, err := captured.Marshal(t.Context())
+			require.NoError(t, err)
+			request, err := captured.Request(t.Context(), releasepolicy.Baseline, "task")
+			require.NoError(t, err)
+			require.Equal(t, []byte("baseline"), request.Resources[0].Content)
+			request.Resources[0].Content[0] = '!'
+			unchanged, err := captured.Marshal(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, wire, unchanged, "a later cached public read must remain detached from executable bytes")
+			require.NoError(t, captured.Recheck(t.Context()))
+
+			changed := append([]byte(nil), executable...)
+			changed[0] ^= 1
+			require.NotEqual(t, executable, changed)
+			require.NoError(t, os.WriteFile(filepath.Join(base, path), changed, 0600))
+			require.Error(t, captured.Recheck(t.Context()), "same-size executable mutation must invalidate currentness")
+			unchanged, err = captured.Marshal(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, wire, unchanged, "source changes cannot mutate retained capture bytes")
 		})
 	}
 }

@@ -342,7 +342,7 @@ func captureArmRecorded(ctx context.Context, binding boundLocation, total *int, 
 	}
 	read := func(path, role string) ([]byte, error) {
 		files.role = role
-		data, err := files.ReadFile(filepath.Join(binding.base, path))
+		data, err := files.readFile(filepath.Join(binding.base, path), role != "executable")
 		if err == nil && recorder != nil {
 			err = recorder.read(path, role)
 		}
