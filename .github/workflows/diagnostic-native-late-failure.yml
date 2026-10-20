@@ -1,0 +1,294 @@
+name: Diagnostic d6ee native late failure Linux profile
+
+# Disposable infrastructure only. Never merge into the feature or default branch.
+on:
+  push:
+    branches: [spboyer-basher-gating-linux-profile-assets]
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    if: github.ref == 'refs/heads/spboyer-basher-gating-linux-profile-assets' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    defaults:
+      run:
+        shell: bash
+    env:
+      NO_COLOR: '1'
+      WAZA_NO_UPDATE_CHECK: '1'
+      ENABLE_COPILOT_TESTS: 'false'
+      ENABLE_COPILOT_SDK_TESTS: 'false'
+      ENABLE_LIVE_COPILOT_TESTS: 'false'
+      ENABLE_LIVE_TESTS: 'false'
+      ENABLE_MODEL_TESTS: 'false'
+      WAZA_EVIDENCE_JUDGE_RUNTIME_TEST: '0'
+      SOURCE_COMMIT: d6ee2ae62b7e48d05891d4b114dd31c22964bd01
+      SOURCE_TREE: 7de15ddd5bbf71dbd4394aa0caea8b0ebd3c57f4
+    steps:
+      - name: Initialize retained evidence
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/native-late-failure-evidence"
+          mkdir -m 700 "$dir"
+          echo "EVIDENCE_DIR=$dir" >> "$GITHUB_ENV"
+          date +%s > "$dir/setup-start-epoch.txt"
+          {
+            printf 'workflow_sha=%s\nsource_commit=%s\nsource_tree=%s\n' "$GITHUB_SHA" "$SOURCE_COMMIT" "$SOURCE_TREE"
+            printf 'run=https://github.com/%s/actions/runs/%s\nattempt=%s\njob=%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB"
+            printf 'runner=%s\narch=%s\nimage=%s\nimage_version=%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$ImageOS" "$ImageVersion"
+            uname -a
+            cat /etc/os-release
+            lscpu
+            free -b
+            printf 'Diagnostic only: no acceptance gate or before/after measurement.\n'
+            printf 'CPU/heap/coverage may be incomplete or absent after panic, timeout or setup failure.\n'
+            printf 'Default CPU/allocation sampling; profiling perturbs execution; heap is not RSS.\n'
+            printf 'Rebuilt dashboard bytes must match the retained d6ee dashboard artifact seven-file vector before Go compilation/profiling.\n'
+            printf 'Dashboard artifact equality does not prove historical Go-binary identity or hosted filesystem modes.\n'
+            printf 'Limits: setup admission 15m, build/test step 40m including unchanged test timeout 30m, seal 3m, upload 5m, job 65m.\n'
+          } > "$dir/metadata.txt"
+      - name: Checkout exact unmodified source with embedded LFS assets
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: d6ee2ae62b7e48d05891d4b114dd31c22964bd01
+          lfs: true
+          persist-credentials: false
+      - name: Setup exact observed Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: go.sum
+      - name: Setup exact observed Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.23.3'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Verify source custody and install rejecting runtime
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          exec > >(tee "$EVIDENCE_DIR/source-setup.stdout") 2> >(tee "$EVIDENCE_DIR/source-setup.stderr" >&2)
+          test "$GITHUB_RUN_ATTEMPT" -eq 1
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$SOURCE_TREE"
+          git diff --exit-code
+          git diff --cached --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          test "$(go env GOVERSION)" = go1.26.9
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          test "$(node --version)" = v22.23.3
+          test "$(npm --version)" = 10.9.9
+          test -z "$(go env GOFLAGS)"
+          git ls-tree -r HEAD > "$EVIDENCE_DIR/source-git-tree.txt"
+          git ls-files -z | xargs -0 sha256sum > "$EVIDENCE_DIR/source-checkout.sha256"
+          git lfs ls-files -l > "$EVIDENCE_DIR/lfs-inventory.txt"
+          git lfs fsck
+          test "$(sha256sum internal/nativesnapshot/collection.go | cut -d' ' -f1)" = 44fce46e885638c9d58f50e22320885e61602136db24f61e156d4d15b52dd832
+          guard="$EVIDENCE_DIR/reject-copilot"
+          printf '#!/bin/sh\nprintf "diagnostic rejects real Copilot launch\\n" >&2\nexit 125\n' > "$guard"
+          chmod 700 "$guard"
+          set +e
+          "$guard" --version > "$EVIDENCE_DIR/guard.stdout" 2> "$EVIDENCE_DIR/guard.stderr"
+          result=$?
+          set -e
+          printf '%s\n' "$result" > "$EVIDENCE_DIR/guard-exit.txt"
+          test "$result" -eq 125
+          echo "COPILOT_CLI_PATH=$guard" >> "$GITHUB_ENV"
+          echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_ENV"
+          echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+          mkdir -m 700 "$EVIDENCE_DIR/home"
+          echo "HOME=$EVIDENCE_DIR/home" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$EVIDENCE_DIR/home/config" >> "$GITHUB_ENV"
+          {
+            go version
+            go env GOOS GOARCH GOAMD64 GOVERSION GOTOOLCHAIN GOFLAGS CGO_ENABLED
+            node --version
+            npm --version
+            stat -c '%a %s %n' "$guard"
+            sha256sum "$guard"
+          } >> "$EVIDENCE_DIR/metadata.txt"
+      - name: Reproduce actual CI module and dashboard setup
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          exec > >(tee "$EVIDENCE_DIR/build.stdout") 2> >(tee "$EVIDENCE_DIR/build.stderr" >&2)
+          go mod verify
+          go mod download
+          (cd web && npm ci && npm run build)
+          git diff --exit-code -- . ':(exclude)web/dist/index.html'
+          git diff --cached --exit-code
+          git diff --binary -- web/dist/index.html > "$EVIDENCE_DIR/generated-index.diff"
+          git status --short > "$EVIDENCE_DIR/source-status-after-build.txt"
+          find web/dist internal/embedded -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$EVIDENCE_DIR/embedded-bytes.sha256"
+          find web/dist internal/embedded -type f -printf '%m %s %p\n' | LC_ALL=C sort > "$EVIDENCE_DIR/embedded-modes-sizes.txt"
+          tar -czf "$EVIDENCE_DIR/web-dist.tar.gz" web/dist
+          sha256sum internal/controlledcomparison/*.go > "$EVIDENCE_DIR/controlledcomparison-source.sha256"
+      - name: Admit only the complete retained d6ee dashboard asset vector
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          exec > >(tee "$EVIDENCE_DIR/asset-admission.stdout") 2> >(tee "$EVIDENCE_DIR/asset-admission.stderr" >&2)
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const reference = {
+            sourceCommit: 'd6ee2ae62b7e48d05891d4b114dd31c22964bd01',
+            sourceTree: '7de15ddd5bbf71dbd4394aa0caea8b0ebd3c57f4',
+            testedMerge: '95f1a510166026d1b158697163f7d24bea50f0cf',
+            dashboardRun: '39401795443',
+            artifactId: '12256025466',
+            archiveSHA256: '937737b2a4567fac01d2c6ae121a93d9c8e5f1cc6f7498c638408e089fe00378',
+            transferManifestSHA256: '6b9a04e404fd37e66d5f6c71f909a1c09f15a239a0df2f1198c4c276109863a8',
+            root: 'web/dist',
+            assets: [
+              ['assets/AssurancePage-BVYmSS1K.js', 173941, 'ac4a559f40af864991e0eba4484317f0c1889e11201a18fc3797ff70a8e555f7'],
+              ['assets/DashboardLab-CJcJs_mA.css', 22921, '227e062f46fc8d75bf0e296dfd8659dff429fdab9f7be143b56d6fd14f48eff0'],
+              ['assets/DashboardLab-nNRj7ZNO.js', 66264, 'a2c7774255ddbfd0ff1c95a4630f455583a54e8b941b57ece991926f0fec15d9'],
+              ['assets/index-D5F2q7Zp.js', 418851, 'a1c5198c5a692b517c70f091b31bbade1099e9bf405105621923e66249c1d771'],
+              ['assets/index-DVpua-aE.css', 30549, 'c3011b7dab8243fad6e3249e63eecbe16a7c170bb002981b4a32bb3fd966a950'],
+              ['favicon.svg', 257, 'f101b0af59959cf48a1449a37aeb78acd71a41120f22eee24a7477c354691ecb'],
+              ['index.html', 467, '178e764825773530f816cb1e43cf126c949991c256cd71d9c0bcb6d80601373c'],
+            ].map(([path, bytes, sha256]) => ({ path, bytes, sha256 })),
+          };
+          const retain = (name, value) => fs.writeFileSync(path.join(process.env.EVIDENCE_DIR, name), JSON.stringify(value, null, 2) + '\n');
+          retain('asset-reference.json', reference);
+          const observed = [];
+          const errors = [];
+          function inventory(relative = '') {
+            const directory = path.join(reference.root, relative);
+            if (!fs.lstatSync(directory).isDirectory()) throw new Error(`Not a regular directory: ${directory}`);
+            for (const name of fs.readdirSync(directory).sort()) {
+              const entry = path.posix.join(relative, name);
+              const filename = path.join(reference.root, entry);
+              const stat = fs.lstatSync(filename);
+              if (stat.isDirectory()) {
+                inventory(entry);
+              } else if (stat.isFile()) {
+                observed.push({ path: entry, bytes: stat.size, sha256: crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex'), type: 'file' });
+              } else {
+                observed.push({ path: entry, bytes: stat.size, type: stat.isSymbolicLink() ? 'symlink' : 'other' });
+              }
+            }
+          }
+          try {
+            inventory();
+          } catch (error) {
+            errors.push(`Asset inventory failed: ${error.code || error.name}: ${error.message}`);
+          }
+          if (process.env.SOURCE_COMMIT !== reference.sourceCommit || process.env.SOURCE_TREE !== reference.sourceTree) errors.push('Source binding mismatch');
+          const comparisons = reference.assets.map(expected => {
+            const actual = observed.find(asset => asset.path === expected.path);
+            return { expected, observed: actual || null, match: actual !== undefined && actual.type === 'file' && actual.bytes === expected.bytes && actual.sha256 === expected.sha256 };
+          });
+          const unexpected = observed.filter(actual => !reference.assets.some(expected => expected.path === actual.path));
+          const pass = errors.length === 0 && unexpected.length === 0 && comparisons.every(asset => asset.match);
+          const result = { pass, sourceCommit: process.env.SOURCE_COMMIT, sourceTree: process.env.SOURCE_TREE, comparisons, unexpected, errors };
+          retain('asset-comparison.json', result);
+          console.log(JSON.stringify(result, null, 2));
+          if (!pass) {
+            console.error('Dashboard asset admission failed; Go compilation/profiling must not start.');
+            process.exitCode = 1;
+          }
+          NODE
+      - name: One unchanged full-package instrumented test-family measurement
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          elapsed=$(( $(date +%s) - $(cat "$EVIDENCE_DIR/setup-start-epoch.txt") ))
+          printf '%s\n' "$elapsed" > "$EVIDENCE_DIR/setup-elapsed-seconds.txt"
+          test "$elapsed" -lt 900
+          unset WAZA_ASSURANCE_CLI WAZA_FROZEN_RELEASE_READER UPDATE_NATIVE_API_FIXTURES WAZA_EVIDENCE_JUDGE_CANARY
+          unset GH_TOKEN GITHUB_TOKEN COPILOT_GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
+          env | grep -E '^(NO_COLOR|WAZA_NO_UPDATE_CHECK|ENABLE_.*TESTS|WAZA_EVIDENCE_JUDGE_RUNTIME_TEST|COPILOT_CLI_PATH|HOME|XDG_CONFIG_HOME)=' | LC_ALL=C sort > "$EVIDENCE_DIR/offline-environment.txt"
+          command=(go test -count=1 -v -json -race -timeout=30m -covermode=atomic
+            -coverprofile="$EVIDENCE_DIR/coverage.txt"
+            -cpuprofile="$EVIDENCE_DIR/cpu.pprof"
+            -memprofile="$EVIDENCE_DIR/heap.pprof"
+            -o "$EVIDENCE_DIR/controlledcomparison.test"
+            -run '^TestNativeLateFailurePreservesEveryStartedAttempt$' ./internal/controlledcomparison)
+          printf '%q ' "${command[@]}" > "$EVIDENCE_DIR/command.txt"
+          printf '\n' >> "$EVIDENCE_DIR/command.txt"
+          date -u +%FT%T.%NZ > "$EVIDENCE_DIR/command-start.txt"
+          set +e
+          "${command[@]}" 2> >(tee "$EVIDENCE_DIR/test.stderr" >&2) | tee "$EVIDENCE_DIR/test.jsonl"
+          codes=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${codes[0]}" > "$EVIDENCE_DIR/test-exit.txt"
+          printf '%s\n' "${codes[1]}" > "$EVIDENCE_DIR/tee-exit.txt"
+          date -u +%FT%T.%NZ > "$EVIDENCE_DIR/command-end.txt"
+          test "${codes[1]}" -eq 0
+          exit "${codes[0]}"
+      - name: Check actual subcases and seal all available evidence
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          cd "$EVIDENCE_DIR"
+          status=0
+          if [[ -f controlledcomparison.test ]]; then
+            {
+              file controlledcomparison.test
+              stat -c '%a %s %n' controlledcomparison.test
+              sha256sum controlledcomparison.test
+              go version -m controlledcomparison.test
+              go tool buildid controlledcomparison.test
+            } > binary-identity.txt 2> binary-identity.stderr || status=1
+          else
+            printf 'Test binary unavailable\n' > binary-unavailable.txt
+            status=1
+          fi
+          if [[ -f test.jsonl ]]; then
+            jq -rj 'select(.Action == "output") | .Output' test.jsonl > test.log || status=1
+            jq -r 'select(.Action == "run" or .Action == "pass" or .Action == "fail" or .Action == "skip") | [.Time,.Action,.Test // "<package>",.Elapsed // ""] | @tsv' test.jsonl > test-status.tsv || status=1
+            jq -r 'select(.Action == "pass" and .Test != null) | .Test' test.jsonl | LC_ALL=C sort > passed-tests.txt || status=1
+            prefix=TestNativeLateFailurePreservesEveryStartedAttempt
+            {
+              printf '%s\n' "$prefix"
+              for name in before-start during-execution during-shutdown between-attempts before-publication publication-conflict overshoot reused-session; do
+                printf '%s/%s\n' "$prefix" "$name"
+              done
+            } | LC_ALL=C sort > expected-passed-tests.txt
+            diff -u expected-passed-tests.txt passed-tests.txt > subcase-verification.diff || status=1
+          else
+            printf 'Test output unavailable\n' > output-unavailable.txt
+            status=1
+          fi
+          for profile in cpu heap; do
+            index=cpu
+            [[ "$profile" == heap ]] && index=alloc_space
+            if [[ -s "$profile.pprof" && -f controlledcomparison.test ]]; then
+              go tool pprof -top -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile.pprof" > "$profile.top.txt" 2> "$profile.top.stderr" || status=1
+              go tool pprof -top -cum -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile.pprof" > "$profile.cum.txt" 2> "$profile.cum.stderr" || status=1
+            else
+              printf '%s profile absent or empty\n' "$profile" > "$profile.unavailable.txt"
+              status=1
+            fi
+          done
+          [[ -s coverage.txt ]] || { printf 'Coverage unavailable\n' > coverage-unavailable.txt; status=1; }
+          if [[ -d "$GITHUB_WORKSPACE/.git" ]]; then
+            git -C "$GITHUB_WORKSPACE" diff --exit-code -- . ':(exclude)web/dist/index.html' > source-post-test.diff 2> source-post-test.stderr || status=1
+            git -C "$GITHUB_WORKSPACE" diff --cached --exit-code >> source-post-test.diff 2>> source-post-test.stderr || status=1
+          fi
+          printf '%s\n' "$status" > evidence-check-exit.txt
+          find . -type f ! -path './home/*' ! -name SHA256SUMS ! -name file-inventory.txt -printf '%m %s %p\n' | LC_ALL=C sort > file-inventory.txt
+          find . -type f ! -path './home/*' ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          exit "$status"
+      - name: Retain raw evidence even after diagnostic failure
+        if: always()
+        timeout-minutes: 5
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: d6ee-native-late-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/native-late-failure-evidence/*
+            !${{ runner.temp }}/native-late-failure-evidence/home
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 1
