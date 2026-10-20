@@ -266,7 +266,7 @@ func DecodeRecord(raw []byte, admitted *Admitted) (*Record, error) {
 	if err := validateModels(r.Accounting.Models); err != nil {
 		return nil, err
 	}
-	if r.Summary.Category == "behavioral" {
+	if expectedVersion == "2.0" && r.Summary.Category == "behavioral" {
 		if err := validateObservedModels(data.Request.Model, r.EventModels.Models, r.Accounting.Models); err != nil {
 			return nil, err
 		}

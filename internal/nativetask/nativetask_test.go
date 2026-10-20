@@ -505,27 +505,36 @@ func TestPublicTapeReaderBindsBehavioralObservedModelsToRequest(t *testing.T) {
 			},
 		},
 		{
-			name:   "legacy absent observations",
+			name:   "absent model observations",
 			mutate: func(*Record) {},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, admitted, record := fixture(t)
+			prepared, admitted, _, _, record := collectionFixture(t)
+			require.Equal(t, "2.0", record.Version)
+			data, err := prepared.view()
+			require.NoError(t, err)
+			require.Equal(t, "2.0", data.CollectionVersion)
+			require.Equal(t, "observed-test-model", data.Request.Model)
 			tc.mutate(&record)
-			prefix, err := readRecordThroughPublicReader(t, admitted, encoded(t, record))
+			events, payload := recordTapeBytes(t, admitted, encoded(t, record))
+			prefix, err := InspectCollectionPrefix(t.Context(), events, payload, []*Admitted{admitted})
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
-				require.Empty(t, prefix.Records)
+				require.Nil(t, prefix, "invalid public records must not return a partial prefix")
 				return
 			}
 			require.NoError(t, err)
 			require.Len(t, prefix.Records, 1)
+			require.Equal(t, "2.0", prefix.Records[0].Version)
 			require.Equal(t, record.Summary.Category, prefix.Records[0].Summary.Category)
+			require.Equal(t, record.EventModels, prefix.Records[0].EventModels)
+			require.Equal(t, record.Accounting, prefix.Records[0].Accounting)
 		})
 	}
 }
 
-func readRecordThroughPublicReader(t *testing.T, admitted *Admitted, raw []byte) (*Prefix, error) {
+func recordTapeBytes(t *testing.T, admitted *Admitted, raw []byte) ([]byte, []byte) {
 	t.Helper()
 	binding, err := admitted.Binding()
 	require.NoError(t, err)
@@ -537,12 +546,7 @@ func readRecordThroughPublicReader(t *testing.T, admitted *Admitted, raw []byte)
 	events = append(events, encoded(t, Event{Kind: eventKind, Version: version, Sequence: 2, Type: "terminal", Admission: binding,
 		State: record.Summary.Category, RecordDigest: recordDigest, RowDigest: rowDigest})...)
 	events = append(events, '\n')
-	root, err := os.OpenRoot(t.TempDir())
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, root.Close()) })
-	require.NoError(t, root.WriteFile(eventFile, events, 0o600))
-	require.NoError(t, root.WriteFile(payloadFile, append(bytes.Clone(raw), '\n'), 0o600))
-	return ReadPrefix(t.Context(), root, []*Admitted{admitted})
+	return events, append(bytes.Clone(raw), '\n')
 }
 
 func TestFinalAccountingZeroVersusMissingAndPartial(t *testing.T) {
@@ -780,4 +784,218 @@ func fixtureTapeBytes(t *testing.T, admissions []*Admitted, records [][]byte) ([
 		payload = append(payload, '\n')
 	}
 	return events, payload
+}
+
+// Frozen private 1.0 fixture and acceptance oracle: b64c6bb10, before public
+// model binding. Both observed model inventories intentionally differ from the request.
+const frozenPrivateModelMismatchRecord = `{
+  "kind": "waza.release-native-task-attempt",
+  "version": "1.0",
+  "collection_id": "c8809a2f690e9145dc3074b48551a56338da64510d8eb468d2a731e3a6a21f92",
+  "policy_digest": {
+    "sha256": "785c7c9e8eb92b41a6b69771102ecc8b635532dc69a8af65a6f3e68fb29245a2",
+    "encoding": "json-v1"
+  },
+  "profile_digest": {
+    "sha256": "c8809a2f690e9145dc3074b48551a56338da64510d8eb468d2a731e3a6a21f92",
+    "encoding": "json-v1"
+  },
+  "resolved_plan_digest": {
+    "sha256": "df1912786a1008385da3992614e8d95a5a0a0e48fa3a10d933169148f9e158a3",
+    "encoding": "json-v1"
+  },
+  "request_digest": {
+    "sha256": "5ba27545763382701704a7b779d4a73695916b98c7f0ada1260a637c231cc6ef",
+    "encoding": "json-v1"
+  },
+  "key": {
+    "cluster_id": "cluster",
+    "task_id": "task",
+    "trial_ordinal": 1,
+    "arm": "baseline",
+    "eval_id": "eval",
+    "attempt_ordinal": 1
+  },
+  "origin": {
+    "eval_id": "eval",
+    "task_id": "task",
+    "run_number": 1,
+    "attempt_count": 1,
+    "prior_attempts": ""
+  },
+  "lifecycle": {
+    "construction": {
+      "state": "completed"
+    },
+    "initialize": {
+      "state": "completed"
+    },
+    "execute": {
+      "state": "completed"
+    },
+    "grade": {
+      "state": "completed"
+    },
+    "shutdown": {
+      "state": "completed"
+    }
+  },
+  "response": {
+    "session_key": {
+      "sha256": "cce7ed05612e0aa42deb2737659e9b4e5231548733b2bd8c6571725f098a127e",
+      "encoding": "json-v1"
+    },
+    "success": true,
+    "error_msg": "",
+    "final_output": "actual nonempty typed output",
+    "duration_ms": 0,
+    "canonical_events": [
+      {
+        "data": {
+          "content": "actual nonempty typed output"
+        },
+        "type": "assistant.message"
+      }
+    ],
+    "tool_policy_mode": "deny_all",
+    "tool_policy_denials": [],
+    "usage_is_cumulative": false,
+    "usage_revision": 0,
+    "usage": null
+  },
+  "output": {
+    "availability": "available",
+    "value": "actual nonempty typed output",
+    "messages": [
+      {
+        "event_ordinal": 1,
+        "content": "actual nonempty typed output",
+        "content_presence": "typed_nonempty"
+      }
+    ]
+  },
+  "diagnostics": [],
+  "event_models": {
+    "models": [
+      "substituted-model"
+    ],
+    "events_observed": 1,
+    "complete": true
+  },
+  "accounting": {
+    "session_key": {
+      "sha256": "cce7ed05612e0aa42deb2737659e9b4e5231548733b2bd8c6571725f098a127e",
+      "encoding": "json-v1"
+    },
+    "source": "rpc",
+    "complete": false,
+    "model_attribution_complete": false,
+    "models": [
+      "substituted-model"
+    ],
+    "usage": null,
+    "provider_currency_state": "unavailable",
+    "reason": "Partial SDK accounting observation."
+  },
+  "actual_row": {
+    "origin": {
+      "eval_id": "eval",
+      "task_id": "task",
+      "run_number": 1,
+      "attempt_count": 1,
+      "prior_attempts": ""
+    },
+    "run": {
+      "run_number": 1,
+      "attempts": 1,
+      "prompt": "synthetic prompt",
+      "status": "passed",
+      "duration_ms": 0,
+      "validations": {
+        "check": {
+          "identifier": "check",
+          "type": "text",
+          "score": 1,
+          "weight": 1,
+          "passed": true,
+          "feedback": "",
+          "duration_ms": 0
+        }
+      },
+      "session_digest": {
+        "tool_call_count": 0,
+        "tools_used": [],
+        "errors": []
+      },
+      "final_output": "actual nonempty typed output"
+    }
+  },
+  "summary": {
+    "key": {
+      "cluster_id": "cluster",
+      "task_id": "task",
+      "trial_ordinal": 1,
+      "arm": "baseline",
+      "eval_id": "eval",
+      "attempt_ordinal": 1
+    },
+    "origin": {
+      "eval_id": "eval",
+      "task_id": "task",
+      "run_number": 1,
+      "attempt_count": 1,
+      "prior_attempts": ""
+    },
+    "status": "passed",
+    "category": "behavioral",
+    "checks": [
+      {
+        "scope": "eval",
+        "grader": "check",
+        "passed": true,
+        "score": 1,
+        "operational_state": "observed"
+      }
+    ],
+    "runtime": {
+      "task_id": "task",
+      "requested_engine": "",
+      "requested_model": "",
+      "requested_reasoning": "",
+      "availability": "unavailable",
+      "engine_implementation": "",
+      "model_version": "",
+      "reason": "Synthetic fixture is not runtime evidence."
+    },
+    "evidence_references": []
+  }
+}`
+
+func TestPrivateTapeReaderPreservesFrozenModelMismatch(t *testing.T) {
+	prepared, profile, admitted, record := fixture(t)
+	require.Equal(t, "1.0", record.Version)
+	require.Equal(t, "1.0", profile.Version)
+	data, err := prepared.view()
+	require.NoError(t, err)
+	require.Empty(t, data.CollectionVersion)
+	require.Equal(t, "observed-test-model", data.Request.Model)
+	var compact bytes.Buffer
+	require.NoError(t, json.Compact(&compact, []byte(frozenPrivateModelMismatchRecord)))
+	var frozen Record
+	require.NoError(t, json.Unmarshal(compact.Bytes(), &frozen))
+	require.Equal(t, "1.0", frozen.Version)
+	require.Equal(t, "behavioral", frozen.Summary.Category)
+	require.Equal(t, []string{"substituted-model"}, frozen.EventModels.Models)
+	require.Equal(t, []string{"substituted-model"}, frozen.Accounting.Models)
+	events, payload := recordTapeBytes(t, admitted, compact.Bytes())
+	root, err := os.OpenRoot(t.TempDir())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+	require.NoError(t, root.WriteFile(eventFile, events, 0o600))
+	require.NoError(t, root.WriteFile(payloadFile, payload, 0o600))
+	prefix, err := ReadPrefix(t.Context(), root, []*Admitted{admitted})
+	require.NoError(t, err)
+	require.Len(t, prefix.Records, 1)
+	require.Equal(t, frozen, prefix.Records[0])
+	require.Nil(t, prefix.Pending)
 }
