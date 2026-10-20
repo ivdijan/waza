@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/microsoft/waza/internal/controlledcomparison"
@@ -75,10 +76,48 @@ func frozenNativeDecisionProcess(t *testing.T, raw []byte) {
 	readeroracle.Output(t, result)
 }
 
+func TestNativeReaderSuppliedDecisionProcess(t *testing.T) {
+	oracle := readeroracle.Build(t, "controlledcomparison")
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	directory := filepath.Join(t.TempDir(), "supplied")
+	require.NoError(t, os.Mkdir(directory, 0700))
+	policy := []byte(`{"kind":"waza.release-native-policy"}`)
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "policy.json"), policy, 0600))
+	input := frozenDecisionInput{Directory: directory, Policy: policy}
+	frozen := readeroracle.Run(t, oracle, "TestNativeReaderFrozen15cDecisionParity", input)
+	raw := readeroracle.Run(t, executable, "TestNativeReaderFrozen15cDecisionParity", input)
+	require.Equal(t, frozen, raw, "full selected/root/API payloads and error classes must match frozen15c")
+	var got frozenDecisionObservation
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Equal(t, "native policy requires its exact six members", got.SelectedError)
+	require.Equal(t, got.SelectedError, got.RootError)
+	require.NotNil(t, got.SelectedClass)
+	require.Equal(t, got.SelectedError, got.SelectedClass.Message)
+	require.NotNil(t, got.RootClass)
+	require.Equal(t, got.RootError, got.RootClass.Message)
+	require.False(t, got.Selected.Accepted)
+	require.Equal(t, "invalid", got.Selected.Compatibility.State)
+	require.NotNil(t, got.Selected.Native)
+	require.Empty(t, got.Selected.Native.Attempts)
+	require.Equal(t, got.Selected, got.Root)
+	var api []webapi.ReleaseCollection
+	require.NoError(t, json.Unmarshal(got.API, &api))
+	require.Len(t, api, 1)
+	require.Equal(t, "supplied", api[0].Path)
+	require.Equal(t, got.RootError, api[0].Error)
+	require.False(t, api[0].Decision.Accepted)
+	require.Equal(t, got.Root.Compatibility, api[0].Decision.Compatibility)
+	require.Equal(t, got.Root.Native, api[0].Decision.Native)
+}
+
 func TestNativeReaderFrozen15cDecisionParity(t *testing.T) {
 	if raw, subprocess := readeroracle.Input(t); subprocess {
 		frozenNativeDecisionProcess(t, raw)
 		return
+	}
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("native durable creation requires Linux or macOS; supplied decision reading remains covered")
 	}
 	oracle := readeroracle.Build(t, "controlledcomparison")
 	binaryBefore, err := os.Stat(oracle)
