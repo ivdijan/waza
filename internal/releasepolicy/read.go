@@ -62,12 +62,64 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, selected *model
 // admitted by a separately versioned envelope. The envelope owner must verify
 // its stronger evidence contract before publishing this decision.
 func ReadCoreDecisionRootContext(ctx context.Context, root *os.Root, selected models.EvidenceDigest) (Decision, error) {
-	return readDecisionProfile(ctx, func(name string) ([]byte, error) {
-		if name == "policy.json" {
-			name = "core-policy.json"
+	decision, _, err := ReadCoreDecisionRetainedRootContext(ctx, root, selected)
+	return decision, err
+}
+
+// RetainedCoreArtifacts is the invocation-local set of core artifact bytes
+// actually consumed while assessing a native collection. Its returned bytes
+// must not be modified.
+type RetainedCoreArtifacts struct {
+	artifacts map[string][]byte
+}
+
+// Artifact returns the exact bytes consumed by core assessment. It never
+// reopens the collection, so native reconciliation cannot join another
+// collection's artifacts after assessment.
+func (r *RetainedCoreArtifacts) Artifact(name string) ([]byte, error) {
+	if r == nil {
+		return nil, fmt.Errorf("retained core artifacts are nil")
+	}
+	data, ok := r.artifacts[name]
+	if !ok {
+		return nil, fmt.Errorf("core artifact %s was not consumed during assessment", name)
+	}
+	return data, nil
+}
+
+// ReadCoreDecisionRetainedRootContext assesses a native core collection and
+// returns the exact input bytes that assessment consumed for later native
+// reconciliation. The retained set is scoped to this invocation only.
+func ReadCoreDecisionRetainedRootContext(ctx context.Context, root *os.Root, selected models.EvidenceDigest) (Decision, *RetainedCoreArtifacts, error) {
+	retained := &RetainedCoreArtifacts{artifacts: map[string][]byte{}}
+	read := func(name string) ([]byte, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		return readArtifactRootContext(ctx, root, name)
-	}, &selected, true)
+		source := name
+		if source == "policy.json" {
+			source = "core-policy.json"
+		}
+		if data, ok := retained.artifacts[source]; ok {
+			return data, nil
+		}
+		data, err := readArtifactRootContext(ctx, root, source)
+		if err != nil {
+			return nil, err
+		}
+		retained.artifacts[source] = data
+		return data, nil
+	}
+	decision, err := readDecisionProfile(ctx, read, &selected, true)
+	if err != nil {
+		// Native failure reporting still needs the durable tape to retain every
+		// started attempt. Keep that supplemental read in this invocation's
+		// set rather than reopening it during reconciliation.
+		if _, streamErr := read("journal.ndjson"); streamErr != nil {
+			err = errors.Join(err, streamErr)
+		}
+	}
+	return decision, retained, err
 }
 
 func readOwnedDecision(ctx context.Context, directory string, selected *models.EvidenceDigest) (d Decision, err error) {

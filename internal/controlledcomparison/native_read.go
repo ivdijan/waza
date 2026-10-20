@@ -119,9 +119,10 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 	if err != nil {
 		return decision, err
 	}
-	core, err := nativeArtifact(ctx, root, "core-policy.json", 16<<20)
+	coreDecision, coreArtifacts, coreErr := releasepolicy.ReadCoreDecisionRetainedRootContext(ctx, root, policy.Digest)
+	core, err := coreArtifacts.Artifact("core-policy.json")
 	if err != nil {
-		return decision, err
+		return coreDecision, errors.Join(coreErr, err)
 	}
 	if !bytes.Equal(core, native.Policy) {
 		return decision, fmt.Errorf("native envelope and core policy bytes differ")
@@ -137,7 +138,6 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 	if err := verifyNativeCapture(ctx, native, policy, capture, captured); err != nil {
 		return decision, err
 	}
-	coreDecision, coreErr := releasepolicy.ReadCoreDecisionRootContext(ctx, root, policy.Digest)
 	coreDecision.Native = decision.Native
 	decision = coreDecision
 	var stopped *nativeStop
@@ -163,7 +163,7 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return decision, err
 	}
-	stream, err := nativeArtifact(ctx, root, "journal.ndjson", 16<<20)
+	stream, err := coreArtifacts.Artifact("journal.ndjson")
 	if err != nil {
 		return decision, errors.Join(coreErr, err)
 	}
@@ -302,7 +302,7 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 		return decision, coreErr
 	}
 	for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
-		finalData, err := nativeArtifact(ctx, root, string(arm)+".final.json", 16<<20)
+		finalData, err := coreArtifacts.Artifact(string(arm) + ".final.json")
 		if err != nil {
 			return decision, err
 		}
@@ -313,7 +313,7 @@ func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (de
 		if !reflect.DeepEqual(final.Usage, nativeUsage(records, &arm)) {
 			return decision, fmt.Errorf("final core usage differs from every retained native session")
 		}
-		resultData, err := nativeArtifact(ctx, root, string(arm)+".results.json", 16<<20)
+		resultData, err := coreArtifacts.Artifact(string(arm) + ".results.json")
 		if err != nil {
 			return decision, err
 		}
