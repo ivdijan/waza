@@ -59,7 +59,7 @@ jobs:
               - 'README.md'
               - 'registry.json'
               - 'internal/models/outcome.go'
-              - 'schemas/eval.schema.json'
+              - 'schemas/**'
               - '.github/workflows/site-ci.yml'
               - '.github/workflows/pages.yml'
             examples:
@@ -92,6 +92,10 @@ jobs:
         if: steps.filter.outputs.site == 'true' || github.event_name == 'push'
         run: cd site && npm run build
 
+      - name: Typecheck chat and test public metadata
+        if: steps.filter.outputs.site == 'true' || github.event_name == 'push'
+        run: cd site && npm run test:chat-types && npm run test:chat-metadata
+
       - name: Install Chromium for site regression tests
         if: steps.filter.outputs.site == 'true' || github.event_name == 'push'
         run: cd site && npx --no-install playwright install --with-deps chromium
@@ -100,6 +104,12 @@ jobs:
         id: tests
         if: steps.filter.outputs.site == 'true' || github.event_name == 'push'
         run: cd site && npm run test:e2e -- --project=chromium --retries=0
+        env:
+          CI: 'true'
+
+      - name: Test optional chat with mocked service and bot protection
+        if: steps.filter.outputs.site == 'true' || github.event_name == 'push'
+        run: cd site && npm run test:chat -- --project=chromium
         env:
           CI: 'true'
 

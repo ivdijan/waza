@@ -1,0 +1,74 @@
+---
+title: Ask Waza (Optional)
+description: Scope, privacy, and limits of the optional documentation assistant.
+---
+
+Ask Waza is an optional, independently operated documentation assistant.
+The launcher appears only when a site operator explicitly enables it.
+Ordinary documentation search remains available without using chat.
+
+**Implementation preview:** public chat is not enabled. The backend uses the
+Azure Functions hosted-skills preview and must clear its runtime isolation,
+history-retention, and inference-bound checks before a public rollout. A
+passing widget test with mocked responses is not evidence that the live service
+is ready.
+
+## What it can help with
+
+- Explain Waza commands and concepts, with links to documentation.
+- Help interpret pasted errors.
+- Suggest corrections to eval, task, and project-configuration YAML.
+
+It cannot execute commands, run evaluations, access your repository, or verify
+that a schema-valid evaluation will work at runtime. Answers are AI-generated:
+check the cited documentation before applying a suggestion.
+The assistant checks that its knowledge snapshot matches the published docs.
+It becomes unavailable while its snapshot needs updating.
+
+## Privacy
+
+**Do not paste credentials, secrets, confidential code, or personal information.**
+Questions, bounded conversation context, and optional YAML are sent to the
+configured Azure model service. Cloudflare Turnstile provides bot protection.
+Provider processing and retention policies apply independently.
+
+The widget keeps conversation and anonymous session credentials in browser
+memory, not browser storage. Reloading the page clears them. The service is
+designed not to persist chat transcripts; anonymous quota records and operational
+counts are separate from conversation content.
+
+## Limits and availability
+
+Bot verification, per-session and per-client quotas, and a global usage limit
+protect the service. Visitors behind a shared network may share a client limit.
+When a quota is reached, use the normal docs search. Requests are not
+automatically retried, and a cancelled request may already have consumed model
+usage.
+
+The assistant can be disabled independently of the docs site. Bot protection,
+storage failures, stale knowledge, or model-service failures can also make chat
+unavailable. These controls reduce abuse risk; they do not guarantee protection
+against every prompt injection or denial-of-service attack.
+
+## Site operator configuration
+
+Chat is disabled by default. Configure these public build variables only after
+the backend's live security and usage-bound checks have passed:
+
+```text
+PUBLIC_CHAT_ENABLED=true
+PUBLIC_CHAT_API_URL=https://your-function.azurewebsites.net/api
+PUBLIC_CHAT_TURNSTILE_SITEKEY=your-public-sitekey
+```
+
+The API URL and sitekey are public, not credentials. Never include an Azure
+model key, Turnstile verification secret, bearer token, or Azure Function key
+in the site configuration.
+
+The Pages workflow reads the same names from GitHub repository variables.
+Changing them requires a new site build. A build with enabled chat but missing
+or invalid configuration fails rather than silently weakening security.
+
+The static `chat-meta.json` artifact publishes a content fingerprint of docs and
+schemas. Operators must promote a matching backend knowledge snapshot before
+enabling chat after a content update. This artifact contains no backend secrets.

@@ -1,0 +1,102 @@
+---
+const enabled = import.meta.env.PUBLIC_CHAT_ENABLED === 'true';
+const apiUrl = import.meta.env.PUBLIC_CHAT_API_URL ?? '';
+const sitekey = import.meta.env.PUBLIC_CHAT_TURNSTILE_SITEKEY ?? '';
+if (enabled) {
+  const endpoint = new URL(apiUrl);
+  if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password
+      || endpoint.search || endpoint.hash || !sitekey.trim()) {
+    throw new Error('Enabled chat requires an HTTPS API URL and a Turnstile sitekey');
+  }
+}
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+{enabled && (
+  <div data-chat-root data-api-url={apiUrl.replace(/\/$/, '')} data-sitekey={sitekey}
+    data-meta-url={`${base}/chat-meta.json`}>
+    <button type="button" class="chat-launcher" data-chat-open aria-haspopup="dialog">Ask Waza</button>
+    <dialog aria-labelledby="chat-title" data-chat-dialog>
+      <div class="chat-heading">
+        <h2 id="chat-title">Ask Waza</h2>
+        <button type="button" data-chat-close aria-label="Close Ask Waza">Close</button>
+      </div>
+      <p class="chat-notice">
+        AI-generated docs help; verify suggestions before use. Do not paste secrets.
+        Input is processed by an Azure model service; bot protection uses Cloudflare.
+        <a href={`${base}/guides/docs-assistant/`}>Limits and privacy</a>
+      </p>
+      <p data-chat-knowledge class="chat-notice"></p>
+      <ol data-chat-messages aria-label="Conversation"></ol>
+      <p data-chat-status role="status" aria-live="polite"></p>
+      <form data-chat-form>
+        <label for="chat-question">Question or error message</label>
+        <textarea id="chat-question" name="question" required maxlength="4096" rows="3"
+          placeholder="How do I write an eval for a custom agent?"></textarea>
+        <details>
+          <summary>Check pasted YAML (optional)</summary>
+          <label for="chat-document-kind">Document type</label>
+          <select id="chat-document-kind" name="documentKind">
+            <option value="eval">Eval specification</option>
+            <option value="task">Task</option>
+            <option value="config">Project configuration</option>
+          </select>
+          <label for="chat-yaml">YAML without credentials</label>
+          <textarea id="chat-yaml" name="yaml" maxlength="8192" rows="5" spellcheck="false"></textarea>
+        </details>
+        <div data-chat-challenge></div>
+        <div class="chat-actions">
+          <button type="submit" data-chat-send disabled>Send</button>
+          <button type="button" data-chat-cancel disabled>Cancel request</button>
+        </div>
+      </form>
+    </dialog>
+  </div>
+)}
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-chat-root]')) {
+    let ready: Promise<void> | undefined;
+    root.querySelector('[data-chat-open]')?.addEventListener('click', () => {
+      const dialog = root.querySelector<HTMLDialogElement>('[data-chat-dialog]');
+      dialog?.showModal();
+      if (!ready) {
+        ready = import('../scripts/chat').then(({ initializeChat }) => initializeChat(root))
+          .catch(() => {
+            const status = root.querySelector('[data-chat-status]');
+            if (status) status.textContent = 'Chat could not load. Please use documentation search.';
+          });
+      }
+    });
+    root.querySelector('[data-chat-close]')?.addEventListener('click', () => {
+      root.querySelector<HTMLDialogElement>('[data-chat-dialog]')?.close();
+    });
+  }
+</script>
+
+<style>
+  .chat-launcher { white-space: nowrap; margin-inline-start: .5rem; }
+  dialog { width: min(42rem, calc(100vw - 2rem)); max-height: 90dvh; overflow: auto;
+    border: 1px solid var(--sl-color-gray-4); border-radius: .75rem; padding: 1.25rem;
+    color: var(--sl-color-text); background: var(--sl-color-bg); }
+  dialog::backdrop { background: rgb(0 0 0 / .5); }
+  .chat-heading, .chat-actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  h2 { margin: 0; font-size: 1.25rem; color: var(--sl-color-white); }
+  .chat-notice { font-size: .8rem; line-height: 1.5; }
+  form { display: grid; gap: .5rem; }
+  label { display: block; font-weight: 600; font-size: .875rem; }
+  textarea, select { box-sizing: border-box; width: 100%; padding: .5rem; color: inherit;
+    background: var(--sl-color-bg); border: 1px solid var(--sl-color-gray-3); border-radius: .25rem; }
+  textarea { resize: vertical; }
+  button { padding: .4rem .65rem; color: var(--sl-color-white); background: var(--sl-color-gray-6);
+    border: 1px solid var(--sl-color-gray-3); border-radius: .25rem; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--sl-color-accent); outline-offset: 2px; }
+  ol { padding-inline-start: 1.25rem; max-height: 35dvh; overflow: auto; }
+  [data-chat-status] { min-height: 1.5em; font-size: .875rem; }
+  :global([data-chat-messages] pre) { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: .35rem 0; }
+  :global([data-chat-messages] li) { margin-block: .75rem; }
+  :global([data-chat-messages] a) { color: var(--sl-color-text-accent); }
+  :global([data-chat-messages] ul) { padding-inline-start: 1.25rem; }
+  @media print { [data-chat-root] { display: none; } }
+</style>
