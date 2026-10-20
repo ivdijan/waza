@@ -469,6 +469,26 @@ func TestPublicTapeReaderBindsBehavioralObservedModelsToRequest(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name: "behavioral null response with completed execution",
+			mutate: func(r *Record) {
+				r.Response = nil
+				r.Output = Output{Availability: "unavailable", Messages: []Message{}, Reason: "Response is missing."}
+				r.ActualRow.Run.FinalOutput = ""
+			},
+			wantErr: "native response/output contradicts execution/grading lifecycle",
+		},
+		{
+			name: "behavioral null response with failed execution",
+			mutate: func(r *Record) {
+				r.Response = nil
+				r.Output = Output{Availability: "unavailable", Messages: []Message{}, Reason: "Response is missing."}
+				r.ActualRow.Run.FinalOutput = ""
+				r.Lifecycle.Execute = Phase{"failed", "send_failed"}
+				r.Lifecycle.Grade = Phase{"not_attempted", "Execution failed."}
+			},
+			wantErr: "behavioral row has unfinished or failed phase",
+		},
+		{
 			name: "behavioral event model mismatch",
 			mutate: func(r *Record) {
 				r.EventModels = EventModels{Models: []string{"substituted-model"}, EventsObserved: 1, Complete: true}
@@ -482,6 +502,22 @@ func TestPublicTapeReaderBindsBehavioralObservedModelsToRequest(t *testing.T) {
 					ProviderCurrencyState: "unavailable", Reason: "Partial SDK accounting observation."}
 			},
 			wantErr: "observed model differs from fixed requested model",
+		},
+		{
+			name: "behavioral canonical event model mismatch",
+			mutate: func(r *Record) {
+				r.Response.CanonicalEvents = []json.RawMessage{json.RawMessage(
+					`{"type":"assistant.message","data":{"content":"actual nonempty typed output","model":"substituted-model"}}`)}
+			},
+			wantErr: "canonical event model differs from fixed requested model",
+		},
+		{
+			name: "matching canonical event model and declaration",
+			mutate: func(r *Record) {
+				r.EventModels = EventModels{Models: []string{"observed-test-model"}, EventsObserved: 1, Complete: true}
+				r.Response.CanonicalEvents = []json.RawMessage{json.RawMessage(
+					`{"type":"assistant.message","data":{"content":"actual nonempty typed output","model":"observed-test-model"}}`)}
+			},
 		},
 		{
 			name: "operational mismatch retained",
@@ -517,11 +553,21 @@ func TestPublicTapeReaderBindsBehavioralObservedModelsToRequest(t *testing.T) {
 			require.Equal(t, "2.0", data.CollectionVersion)
 			require.Equal(t, "observed-test-model", data.Request.Model)
 			tc.mutate(&record)
-			events, payload := recordTapeBytes(t, admitted, encoded(t, record))
+			raw := encoded(t, record)
+			if record.Response == nil {
+				value, err := jsonutil.Parse(raw)
+				require.NoError(t, err)
+				object := objectValue(t, value)
+				require.Contains(t, object, "response")
+				require.Nil(t, object["response"], "the public record must explicitly retain response:null")
+				require.Equal(t, "behavioral", record.Summary.Category)
+			}
+			events, payload := recordTapeBytes(t, admitted, raw)
 			prefix, err := InspectCollectionPrefix(t.Context(), events, payload, []*Admitted{admitted})
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
 				require.Nil(t, prefix, "invalid public records must not return a partial prefix")
+				t.Logf("Public prefix rejected record: %v", err)
 				return
 			}
 			require.NoError(t, err)

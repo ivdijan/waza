@@ -137,6 +137,22 @@ func TestRetainedDecisionRootCompleteAndPartial(t *testing.T) {
 	}
 }
 
+func TestRetainedSelectedDecisionRootBindsSelectedPolicy(t *testing.T) {
+	policy := testPolicy(t, 8)
+	root, err := os.OpenRoot(authoredRootCollection(t, policy, true))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, root.Close()) })
+
+	decision, err := ReadSelectedDecisionRootContext(t.Context(), root, policy.Digest)
+	require.NoError(t, err)
+	require.True(t, decision.Accepted)
+
+	decision, err = ReadSelectedDecisionRootContext(t.Context(), root, testPolicy(t, 12).Digest)
+	require.ErrorContains(t, err, "selected policy identity differs")
+	require.False(t, decision.Accepted)
+	require.Equal(t, "mismatched", decision.Compatibility.State)
+}
+
 func TestRetainedDecisionRootInvalidAndCancellation(t *testing.T) {
 	d, err := ReadDecisionRootContext(t.Context(), nil)
 	require.ErrorContains(t, err, "root is nil")

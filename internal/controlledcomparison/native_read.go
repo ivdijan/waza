@@ -74,7 +74,14 @@ func ReadSelectedDecision(ctx context.Context, directory string, selected []byte
 			}
 		}
 	}
-	return ReadDecisionRootContext(ctx, root)
+	if !IsNativePolicy(actual) {
+		policy, err := releasepolicy.DecodePolicy(selected)
+		if err != nil {
+			return releasepolicy.InitialDecision(), err
+		}
+		return releasepolicy.ReadSelectedDecisionRootContext(ctx, root, policy.Digest)
+	}
+	return readDecisionRootContext(ctx, root, actual)
 }
 
 func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision releasepolicy.Decision, err error) {
@@ -82,6 +89,12 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (decision relea
 	if err != nil {
 		return releasepolicy.InitialDecision(), err
 	}
+	return readDecisionRootContext(ctx, root, raw)
+}
+
+// readDecisionRootContext assesses the exact policy bytes already admitted by
+// the caller. It must not reopen policy.json after selection has been checked.
+func readDecisionRootContext(ctx context.Context, root *os.Root, raw []byte) (decision releasepolicy.Decision, err error) {
 	if !IsNativePolicy(raw) {
 		return releasepolicy.ReadDecisionRootContext(ctx, root)
 	}

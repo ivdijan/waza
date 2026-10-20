@@ -36,6 +36,16 @@ func ReadSelectedDecisionContext(ctx context.Context, directory string, selected
 // reads to that root, but does not establish an immutable or authentic snapshot.
 // The caller owns the root and must handle its close before publishing a result.
 func ReadDecisionRootContext(ctx context.Context, root *os.Root) (Decision, error) {
+	return readDecisionRootContext(ctx, root, nil)
+}
+
+// ReadSelectedDecisionRootContext assesses the policy currently retained by
+// root only when it preserves the caller's admitted selected identity.
+func ReadSelectedDecisionRootContext(ctx context.Context, root *os.Root, selected models.EvidenceDigest) (Decision, error) {
+	return readDecisionRootContext(ctx, root, &selected)
+}
+
+func readDecisionRootContext(ctx context.Context, root *os.Root, selected *models.EvidenceDigest) (Decision, error) {
 	if err := ctx.Err(); err != nil {
 		return InitialDecision(), err
 	}
@@ -45,7 +55,7 @@ func ReadDecisionRootContext(ctx context.Context, root *os.Root) (Decision, erro
 	}
 	return readDecision(ctx, func(name string) ([]byte, error) {
 		return readArtifactRootContext(ctx, root, name)
-	}, nil)
+	}, selected)
 }
 
 // ReadCoreDecisionRootContext verifies the unchanged core artifacts underneath

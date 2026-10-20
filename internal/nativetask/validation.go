@@ -322,6 +322,11 @@ func DecodeRecord(raw []byte, admitted *Admitted) (*Record, error) {
 			len(r.Diagnostics) > 0 || r.Output.Availability != "available" {
 			return nil, fmt.Errorf("operational native evidence cannot become behavioral")
 		}
+		if expectedVersion == "2.0" {
+			if err := validateCanonicalEventModels(data.Request.Model, r.EventModels.Models, r.Response.CanonicalEvents); err != nil {
+				return nil, err
+			}
+		}
 		if len(r.Summary.Checks) == 0 {
 			return nil, fmt.Errorf("native behavioral row needs actual scoped text checks")
 		}
@@ -457,6 +462,34 @@ func validateObservedModels(requested string, observations ...[]string) error {
 			if model != requested {
 				return fmt.Errorf("native observed model differs from fixed requested model")
 			}
+		}
+	}
+	return nil
+}
+
+func validateCanonicalEventModels(requested string, observed []string, events []json.RawMessage) error {
+	for _, event := range events {
+		value, err := jsonutil.Parse(event)
+		if err != nil {
+			return err
+		}
+		object, ok := value.(map[string]any)
+		if !ok || object["type"] != "assistant.message" {
+			continue
+		}
+		data, ok := object["data"].(map[string]any)
+		if !ok {
+			continue
+		}
+		model, ok := data["model"].(string)
+		if !ok {
+			continue
+		}
+		if model != requested {
+			return fmt.Errorf("native canonical event model differs from fixed requested model")
+		}
+		if !slices.Contains(observed, model) {
+			return fmt.Errorf("native canonical event model is absent from declared event observations")
 		}
 	}
 	return nil

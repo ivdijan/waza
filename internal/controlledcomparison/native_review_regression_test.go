@@ -2,6 +2,7 @@ package controlledcomparison_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -156,6 +157,136 @@ func TestNativeCollectionDiscoveryOrder(t *testing.T) {
 		controlledcomparison.NativeCollectorOptions{NewCopilotClient: nativeFactory(t, &calls)})
 	require.Error(t, err)
 	require.Equal(t, 4, calls, "drift rejects before another runtime starts")
+}
+
+type replaceAfterInitialPolicyReadContext struct {
+	context.Context
+	errCalls int
+	replaced bool
+	replace  func()
+}
+
+func (c *replaceAfterInitialPolicyReadContext) Err() error {
+	c.errCalls++
+	if c.errCalls == 4 {
+		c.replace()
+		c.replaced = true
+	}
+	return c.Context.Err()
+}
+
+func copyCollectionArtifacts(t testing.TB, source, destination string) {
+	t.Helper()
+	require.NoError(t, filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		if relative == "." {
+			return nil
+		}
+		target := filepath.Join(destination, relative)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o600)
+	}))
+}
+
+func TestReadSelectedDecisionRejectsCollectionReplacedAfterSelection(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("native durable creation requires Linux or macOS")
+	}
+	source := nativeFixture(t, "fixed-model")
+	policyA, err := controlledcomparison.PlanNative(t.Context(), source, source, nativeDesign(), nativeRequirements(), nil)
+	require.NoError(t, err)
+	policyA = fixedNativePolicy(t, policyA)
+	changed := nativeDesign()
+	changed.Margin = "0.5"
+	policyB, err := controlledcomparison.PlanNative(t.Context(), source, source, changed, nativeRequirements(), nil)
+	require.NoError(t, err)
+	policyB = fixedNativePolicy(t, policyB)
+	require.NotEqual(t, policyA, policyB)
+
+	collectionA, collectionB := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
+	calls := 0
+	require.NoError(t, controlledcomparison.CollectNativeWithOptions(t.Context(), policyA, source, source, collectionA,
+		controlledcomparison.NativeCollectorOptions{NewCopilotClient: nativeFactory(t, &calls)}))
+	require.NoError(t, controlledcomparison.CollectNativeWithOptions(t.Context(), policyB, source, source, collectionB,
+		controlledcomparison.NativeCollectorOptions{NewCopilotClient: nativeFactory(t, &calls)}))
+
+	ctx := &replaceAfterInitialPolicyReadContext{Context: t.Context(), replace: func() {
+		copyCollectionArtifacts(t, collectionB, collectionA)
+	}}
+	decision, err := controlledcomparison.ReadSelectedDecision(ctx, collectionA, policyA)
+	require.True(t, ctx.replaced, "replacement occurs after selection and before assessment")
+	require.Error(t, err)
+	require.False(t, decision.Accepted)
+	current, readErr := os.ReadFile(filepath.Join(collectionA, "policy.json"))
+	require.NoError(t, readErr)
+	require.Equal(t, policyB, current, "the regression replaces actual collection artifacts rather than mutating an in-memory value")
+}
+
+func TestReadSelectedDecisionRejectsMockCollectionReplacedAfterSelection(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("durable mock collection requires Linux or macOS")
+	}
+	source := nativeFixture(t, "fixed-model")
+	raw, err := os.ReadFile(source.EvalPath)
+	require.NoError(t, err)
+	require.Contains(t, string(raw), "executor: copilot-sdk")
+	raw = bytes.Replace(raw, []byte("executor: copilot-sdk"), []byte("executor: mock"), 1)
+	raw = bytes.Replace(raw, []byte("schemaVersion: '1.0'\nname: native\n"),
+		[]byte("schemaVersion: '2.0'\nname: native\nscenario: controlled-offline\nversion: '1.0'\n"), 1)
+	raw = append(raw, []byte("metrics:\n  - name: accuracy\n    weight: 1\n    threshold: 0.8\n")...)
+	require.NoError(t, os.WriteFile(source.EvalPath, raw, 0o600))
+	policyA, err := controlledcomparison.Plan(source, source, nativeDesign(), nativeRequirements(), nil)
+	require.NoError(t, err)
+	changed := nativeDesign()
+	changed.Margin = "0.5"
+	policyB, err := controlledcomparison.Plan(source, source, changed, nativeRequirements(), nil)
+	require.NoError(t, err)
+	require.NotEqual(t, policyA, policyB)
+	require.False(t, controlledcomparison.IsNativePolicy(policyA))
+	require.False(t, controlledcomparison.IsNativePolicy(policyB))
+
+	collectionA, collectionB := filepath.Join(t.TempDir(), "a"), filepath.Join(t.TempDir(), "b")
+	require.NoError(t, controlledcomparison.Collect(t.Context(), policyA, source, source, collectionA))
+	require.NoError(t, controlledcomparison.Collect(t.Context(), policyB, source, source, collectionB))
+	for _, control := range []struct {
+		directory string
+		policy    []byte
+	}{{collectionA, policyA}, {collectionB, policyB}} {
+		decision, err := controlledcomparison.ReadSelectedDecision(t.Context(), control.directory, control.policy)
+		require.NoError(t, err)
+		require.False(t, decision.Accepted, "valid mock evidence remains statistically inconclusive")
+		require.Equal(t, "inconclusive", decision.Statistics.State)
+		require.Equal(t, "compatible", decision.Compatibility.State)
+		require.Equal(t, 1, decision.Accounting[releasepolicy.Baseline].Attempts)
+	}
+
+	ctx := &replaceAfterInitialPolicyReadContext{Context: t.Context(), replace: func() {
+		copyCollectionArtifacts(t, collectionB, collectionA)
+	}}
+	decision, err := controlledcomparison.ReadSelectedDecision(ctx, collectionA, policyA)
+	require.True(t, ctx.replaced, "replacement occurs after selection and before assessment")
+	current, readErr := os.ReadFile(filepath.Join(collectionA, "policy.json"))
+	require.NoError(t, readErr)
+	require.Equal(t, policyB, current, "replace actual persisted artifacts with the independently valid B collection")
+	require.ErrorContains(t, err, "selected policy identity differs from the precollection commitment")
+	require.False(t, decision.Accepted)
+	require.Equal(t, "mismatched", decision.Compatibility.State, "a binding rejection is not ordinary mock inconclusiveness")
+	matching, err := controlledcomparison.ReadSelectedDecision(t.Context(), collectionA, policyB)
+	require.NoError(t, err)
+	require.Equal(t, "compatible", matching.Compatibility.State)
+	require.Equal(t, "inconclusive", matching.Statistics.State)
 }
 
 func TestNativeTerminalPolicyAndLateStop(t *testing.T) {
