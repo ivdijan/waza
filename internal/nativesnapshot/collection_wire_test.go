@@ -121,3 +121,62 @@ func BenchmarkReadCollectionCaptureActualExecutable(b *testing.B) {
 		require.NotNil(b, retained)
 	}
 }
+
+func TestCollectionCaptureBufferOwnershipAndCurrentness(t *testing.T) {
+	base, locations := fixture(t)
+	write(t, base, "baseline/waza.lock", "")
+	captured, err := CaptureCollection(t.Context(), locations)
+	require.NoError(t, err)
+	emptyFound := false
+	for _, entry := range captured.capture.prepared.sources[releasepolicy.Baseline] {
+		if entry.Path == "baseline/waza.lock" {
+			emptyFound = true
+			require.Nil(t, entry.Bytes, "empty sources retain their frozen nil representation")
+			require.Equal(t, releasepolicy.SourceDigest(nil), entry.Digest)
+		}
+	}
+	require.True(t, emptyFound)
+	request, err := captured.Request(t.Context(), releasepolicy.Baseline, "task")
+	require.NoError(t, err)
+	require.Equal(t, []byte("baseline"), request.Resources[0].Content)
+	request.Resources[0].Content[0] = '!'
+	detached, err := captured.Request(t.Context(), releasepolicy.Baseline, "task")
+	require.NoError(t, err)
+	require.Equal(t, []byte("baseline"), detached.Resources[0].Content)
+	require.NoError(t, captured.Recheck(t.Context()))
+
+	write(t, base, "baseline/context/a.txt", "modified")
+	require.Error(t, captured.Recheck(t.Context()), "same-length backing-file changes must invalidate currentness")
+	detached, err = captured.Request(t.Context(), releasepolicy.Baseline, "task")
+	require.NoError(t, err)
+	require.Equal(t, []byte("baseline"), detached.Resources[0].Content)
+	recaptured, err := CaptureCollection(t.Context(), locations)
+	require.NoError(t, err)
+	current, err := recaptured.Request(t.Context(), releasepolicy.Baseline, "task")
+	require.NoError(t, err)
+	require.Equal(t, []byte("modified"), current.Resources[0].Content)
+}
+
+// BenchmarkCaptureCollectionActualExecutable measures source recapture using the
+// real test executable under collection-level bounds.
+func BenchmarkCaptureCollectionActualExecutable(b *testing.B) {
+	base, locations := fixture(b)
+	executable, err := os.Executable()
+	require.NoError(b, err)
+	input, err := os.Open(executable)
+	require.NoError(b, err)
+	output, err := os.OpenFile(filepath.Join(base, "evaluator"), os.O_WRONLY|os.O_TRUNC, 0o600)
+	require.NoError(b, err)
+	_, copyErr := io.Copy(output, input)
+	require.NoError(b, input.Close())
+	require.NoError(b, copyErr)
+	require.NoError(b, output.Close())
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		captured, err := CaptureCollection(b.Context(), locations)
+		require.NoError(b, err)
+		require.NotNil(b, captured)
+	}
+}

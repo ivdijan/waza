@@ -34,6 +34,36 @@ func reader(t *testing.T, ctx context.Context) (*capturedFiles, string) {
 		roles: map[string]map[string]bool{}, total: &total, role: "input"}, base
 }
 
+func TestSourceReadOwnedBytes(t *testing.T) {
+	files, base := reader(t, t.Context())
+	path := filepath.Join(base, "input")
+	write(t, base, "input", "original")
+	first, err := files.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, []byte("original"), first)
+	first[0] = '!'
+	require.Equal(t, []byte("original"), files.data["input"], "initial read must not expose retained bytes")
+	cached, err := files.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, []byte("original"), cached)
+	cached[0] = '?'
+	require.Equal(t, []byte("original"), files.data["input"], "cached read must not expose retained bytes")
+	inventory := files.inventory()
+	require.Len(t, inventory, 1)
+	require.Equal(t, []byte("original"), inventory[0].Bytes)
+	inventory[0].Bytes[0] = '#'
+	require.Equal(t, []byte("original"), files.data["input"], "inventory must not expose retained bytes")
+	require.Equal(t, len("original"), *files.total)
+
+	write(t, base, "empty", "")
+	empty, err := files.ReadFile(filepath.Join(base, "empty"))
+	require.NoError(t, err)
+	require.Nil(t, empty)
+	empty, present := files.data["empty"]
+	require.True(t, present)
+	require.Nil(t, empty)
+}
+
 func TestSourceReadBoundsCancellationAndChangingRead(t *testing.T) {
 	t.Run("source_size", func(t *testing.T) {
 		files, base := reader(t, context.Background())

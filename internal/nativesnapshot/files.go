@@ -172,6 +172,9 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 		return nil, fmt.Errorf("input changed before read")
 	}
 	var output bytes.Buffer
+	if before.Size() > 0 {
+		output.Grow(int(before.Size()))
+	}
 	buf := make([]byte, 64<<10)
 	for {
 		if err := f.ctx.Err(); err != nil {
@@ -210,7 +213,7 @@ func (f *capturedFiles) ReadFile(path string) (data []byte, err error) {
 	if err := f.ctx.Err(); err != nil {
 		return nil, err
 	}
-	f.data[rel] = bytes.Clone(output.Bytes())
+	f.data[rel] = output.Bytes()
 	f.info[rel] = before
 	*f.total += output.Len()
 	f.addRole(rel)
