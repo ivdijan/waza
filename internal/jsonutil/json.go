@@ -269,3 +269,54 @@ func read(decoder *json.Decoder, depth int) (any, error) {
 	}
 	return token, nil
 }
+
+// ObjectMemberRange validates a JSON document and returns the byte range of
+// the top-level member value with the requested decoded key. Ranges alias data.
+func ObjectMemberRange(data []byte, wanted string) (start, end int, found bool, err error) {
+	if !utf8.Valid(data) {
+		return 0, 0, false, errors.New("JSON is not UTF-8")
+	}
+	if err := ValidateUnicodeEscapes(data); err != nil {
+		return 0, 0, false, err
+	}
+	if !json.Valid(data) {
+		return 0, 0, false, errors.New("invalid JSON")
+	}
+	scan := keyScanner{data: data}
+	scan.whitespace()
+	if scan.pos >= len(data) || data[scan.pos] != '{' {
+		return 0, 0, false, nil
+	}
+	scan.pos++
+	scan.whitespace()
+	var keys objectKeys
+	for scan.pos < len(data) && data[scan.pos] != '}' {
+		rawKey := scan.stringBytes()
+		if err := keys.add(rawKey); err != nil {
+			return 0, 0, false, err
+		}
+		var key string
+		if err := json.Unmarshal(rawKey, &key); err != nil {
+			return 0, 0, false, errors.New("invalid JSON object key")
+		}
+		scan.whitespace()
+		scan.pos++
+		scan.whitespace()
+		valueStart := scan.pos
+		if err := scan.value(1); err != nil {
+			return 0, 0, false, err
+		}
+		if key == wanted {
+			start, end, found = valueStart, scan.pos, true
+		}
+		scan.whitespace()
+		if scan.pos < len(data) && data[scan.pos] == ',' {
+			scan.pos++
+			scan.whitespace()
+		}
+	}
+	if scan.pos >= len(data) || data[scan.pos] != '}' {
+		return 0, 0, false, errors.New("invalid JSON object")
+	}
+	return start, end, found, nil
+}

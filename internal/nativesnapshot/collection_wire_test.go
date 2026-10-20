@@ -90,3 +90,34 @@ func TestCollectionLimitSelectionAndWireBoundary(t *testing.T) {
 	_, err := CaptureCollection(nil, nil)  //nolint:staticcheck // Explicit nil-context boundary.
 	require.Error(t, err)
 }
+
+// BenchmarkReadCollectionCaptureActualExecutable measures the production reader
+// against a real test executable at the admitted descriptor boundary.
+func BenchmarkReadCollectionCaptureActualExecutable(b *testing.B) {
+	base, locations := fixture(b)
+	executable, err := os.Executable()
+	require.NoError(b, err)
+	input, err := os.Open(executable)
+	require.NoError(b, err)
+	output, err := os.OpenFile(filepath.Join(base, "evaluator"), os.O_WRONLY|os.O_TRUNC, 0o600)
+	require.NoError(b, err)
+	_, copyErr := io.Copy(output, input)
+	require.NoError(b, input.Close())
+	require.NoError(b, copyErr)
+	info, err := output.Stat()
+	require.NoError(b, err)
+	require.NoError(b, output.Truncate(max(info.Size(), int64(maxExecutableBytes+1))))
+	require.NoError(b, output.Close())
+	captured, err := CaptureCollection(b.Context(), locations)
+	require.NoError(b, err)
+	raw, err := captured.Marshal(b.Context())
+	require.NoError(b, err)
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		retained, err := ReadCollectionCapture(b.Context(), raw)
+		require.NoError(b, err)
+		require.NotNil(b, retained)
+	}
+}

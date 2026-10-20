@@ -11,6 +11,7 @@ import (
 	"github.com/microsoft/waza/internal/controlledprojection"
 	"github.com/microsoft/waza/internal/evidence"
 	"github.com/microsoft/waza/internal/execution"
+	"github.com/microsoft/waza/internal/jsonutil"
 	"github.com/microsoft/waza/internal/models"
 	"github.com/microsoft/waza/internal/nativetask"
 	"github.com/microsoft/waza/internal/releasepolicy"
@@ -234,7 +235,18 @@ func ReadCollectionCapture(ctx context.Context, raw []byte) (*CollectionCapture,
 	if err := collectionWireSize(len(raw)); err != nil {
 		return nil, err
 	}
-	if err := models.ValidateNativeJSONKeys(raw, collectionCaptureWire{}); err != nil {
+	blobsStart, blobsEnd, found, err := jsonutil.ObjectMemberRange(raw, "blobs")
+	if err != nil {
+		return nil, err
+	}
+	strictRaw := raw
+	if found {
+		strictRaw = make([]byte, 0, len(raw)-(blobsEnd-blobsStart)+2)
+		strictRaw = append(strictRaw, raw[:blobsStart]...)
+		strictRaw = append(strictRaw, '{', '}')
+		strictRaw = append(strictRaw, raw[blobsEnd:]...)
+	}
+	if err := models.ValidateNativeJSONKeys(strictRaw, collectionCaptureWire{}); err != nil {
 		return nil, err
 	}
 	var wire collectionCaptureWire

@@ -41,13 +41,13 @@ inputs:
 instruction_files: ["instruction.md"]
 `
 
-func write(t *testing.T, root, path, data string) {
+func write(t testing.TB, root, path, data string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(root, path), []byte(data), 0600))
 }
 
-func fixture(t *testing.T) (string, map[releasepolicy.Arm]ArmLocation) {
+func fixture(t testing.TB) (string, map[releasepolicy.Arm]ArmLocation) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("native snapshot directory discovery is unsupported on Windows; covered by the platform negative test")
