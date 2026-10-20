@@ -19,7 +19,6 @@ jobs:
       ENABLE_COPILOT_TESTS: 'false'
       ENABLE_COPILOT_SDK_TESTS: 'false'
       ENABLE_LIVE_COPILOT_TESTS: 'false'
-      WAZA_DIAGNOSTIC_PROFILE_DIR: ${{ runner.temp }}/controlledcomparison-profile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -32,6 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export WAZA_DIAGNOSTIC_PROFILE_DIR="$RUNNER_TEMP/controlledcomparison-profile"
+          echo "WAZA_DIAGNOSTIC_PROFILE_DIR=$WAZA_DIAGNOSTIC_PROFILE_DIR" >> "$GITHUB_ENV"
           mkdir -m 700 "$WAZA_DIAGNOSTIC_PROFILE_DIR"
           guard="$RUNNER_TEMP/reject-copilot"
           printf '#!/bin/sh\necho "diagnostic gate rejects real Copilot execution" >&2\nexit 125\n' > "$guard"
