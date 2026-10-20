@@ -48,11 +48,6 @@ func TestSourceReadOwnedBytes(t *testing.T) {
 	require.Equal(t, []byte("original"), cached)
 	cached[0] = '?'
 	require.Equal(t, []byte("original"), files.data["input"], "cached read must not expose retained bytes")
-	inventory := files.inventory()
-	require.Len(t, inventory, 1)
-	require.Equal(t, []byte("original"), inventory[0].Bytes)
-	inventory[0].Bytes[0] = '#'
-	require.Equal(t, []byte("original"), files.data["input"], "inventory must not expose retained bytes")
 	require.Equal(t, len("original"), *files.total)
 
 	write(t, base, "empty", "")

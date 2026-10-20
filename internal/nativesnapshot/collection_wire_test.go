@@ -2,6 +2,8 @@ package nativesnapshot
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -157,12 +159,123 @@ func TestCollectionCaptureBufferOwnershipAndCurrentness(t *testing.T) {
 	require.Equal(t, []byte("modified"), current.Resources[0].Content)
 }
 
+func TestSourceInventoryOwnershipHandoff(t *testing.T) {
+	files, base := reader(t, t.Context())
+	write(t, base, "input", "original")
+	write(t, base, "empty", "")
+	first, err := files.ReadFile(filepath.Join(base, "input"))
+	require.NoError(t, err)
+	cached, err := files.ReadFile(filepath.Join(base, "input"))
+	require.NoError(t, err)
+	empty, err := files.ReadFile(filepath.Join(base, "empty"))
+	require.NoError(t, err)
+	require.Nil(t, empty)
+	owned := &files.data["input"][0]
+	retainedMap := files.data
+	inventory := files.takeInventory()
+	require.Len(t, inventory, 2)
+	require.Empty(t, retainedMap, "even a retained map must no longer reference transferred buffers")
+	require.True(t, files.frozen)
+	require.Equal(t, "empty", inventory[0].Path)
+	require.Nil(t, inventory[0].Bytes)
+	require.Equal(t, releasepolicy.SourceDigest(nil), inventory[0].Digest)
+	require.Equal(t, "input", inventory[1].Path)
+	require.Same(t, owned, &inventory[1].Bytes[0], "terminal handoff must not clone the owned buffer")
+	first[0], cached[0] = '!', '?'
+	require.Equal(t, []byte("original"), inventory[1].Bytes, "all prior ReadFile results remain detached")
+	require.Equal(t, releasepolicy.SourceDigest([]byte("original")), inventory[1].Digest)
+	require.Equal(t, []string{"input"}, inventory[1].Roles)
+	files.roles["input"]["later"] = true
+	require.Equal(t, []string{"input"}, inventory[1].Roles)
+	write(t, base, "input", "modified")
+	_, err = files.ReadFile(filepath.Join(base, "input"))
+	require.ErrorContains(t, err, "uncaptured input", "a consumed reader must not reopen transferred sources")
+	require.Equal(t, []byte("original"), inventory[1].Bytes)
+	require.Equal(t, []source{}, files.takeInventory(), "a repeated handoff must not retain or publish aliases")
+
+	for _, data := range [][]byte{nil, {}} {
+		files, _ := reader(t, t.Context())
+		files.data["empty"] = data
+		transferred := files.takeInventory()
+		require.Len(t, transferred, 1)
+		require.Equal(t, data, transferred[0].Bytes, "handoff preserves nil versus nonnil empty bytes")
+	}
+}
+
+func TestCollectionCaptureTransferredInventoryMatchesFrozenSource(t *testing.T) {
+	for _, emptyLock := range []bool{false, true} {
+		t.Run(map[bool]string{false: "absent_lock", true: "empty_lock"}[emptyLock], func(t *testing.T) {
+			base, locations := fixture(t)
+			if emptyLock {
+				write(t, base, "baseline/waza.lock", "")
+			}
+			original := frozenOriginalCapture(t, locations)
+			captured, err := CaptureCollection(t.Context(), locations)
+			require.NoError(t, err)
+			require.Equal(t, original.Canonical, captured.capture.prepared.canonical)
+			require.Equal(t, original.Sources, captured.capture.prepared.sources)
+			projections, err := captured.Projections(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, original.Projection, projections)
+			wire, err := captured.Marshal(t.Context())
+			require.NoError(t, err)
+			for range 2 {
+				again, err := CaptureCollection(t.Context(), locations)
+				require.NoError(t, err)
+				againWire, err := again.Marshal(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, wire, againWire)
+				for _, arm := range []releasepolicy.Arm{releasepolicy.Baseline, releasepolicy.Candidate} {
+					request, err := again.Request(t.Context(), arm, "task")
+					require.NoError(t, err)
+					require.Equal(t, []byte(arm), request.Resources[0].Content)
+					request.Resources[0].Content[0] = '!'
+					spec, task, err := again.Task(t.Context(), arm, "task")
+					require.NoError(t, err)
+					spec.Name = "caller mutation"
+					task.Stimulus.Message = "caller mutation"
+				}
+				againWire[0] = '!'
+				unchanged, err := again.Marshal(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, wire, unchanged, "public results cannot mutate retained sources or wire")
+				require.NoError(t, again.Recheck(t.Context()))
+			}
+			write(t, base, "baseline/context/unused.txt", "not consumed")
+			require.NoError(t, captured.Recheck(t.Context()), "unconsumed files remain alternative-valid")
+			write(t, base, "baseline/context/a.txt", "modified")
+			require.Error(t, captured.Recheck(t.Context()))
+			unchanged, err := captured.Marshal(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, wire, unchanged, "source mutation cannot change published bytes")
+			changed, err := CaptureCollection(t.Context(), locations)
+			require.NoError(t, err)
+			changedWire, err := changed.Marshal(t.Context())
+			require.NoError(t, err)
+			require.NotEqual(t, wire, changedWire, "a fresh capture must observe changed source bytes")
+			require.NoError(t, os.Remove(filepath.Join(base, "baseline/context/a.txt")))
+			failed, err := CaptureCollection(t.Context(), locations)
+			require.Error(t, err)
+			require.Nil(t, failed)
+		})
+	}
+}
+
 // BenchmarkCaptureCollectionActualExecutable measures source recapture using the
-// real test executable under collection-level bounds.
+// real test executable under collection-level bounds. An explicit executable
+// keeps the payload fixed when comparing different benchmark builds.
 func BenchmarkCaptureCollectionActualExecutable(b *testing.B) {
 	base, locations := fixture(b)
-	executable, err := os.Executable()
+	executable := os.Getenv("WAZA_CAPTURE_BENCHMARK_EXECUTABLE")
+	if executable == "" {
+		var err error
+		executable, err = os.Executable()
+		require.NoError(b, err)
+	}
+	payload, err := os.ReadFile(executable)
 	require.NoError(b, err)
+	digest := sha256.Sum256(payload)
+	b.Logf("executable input: size=%d sha256=%s", len(payload), hex.EncodeToString(digest[:]))
 	input, err := os.Open(executable)
 	require.NoError(b, err)
 	output, err := os.OpenFile(filepath.Join(base, "evaluator"), os.O_WRONLY|os.O_TRUNC, 0o600)

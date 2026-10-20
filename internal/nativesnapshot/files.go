@@ -370,7 +370,11 @@ func (f *capturedFiles) WalkDir(path string, fn fs.WalkDirFunc) error {
 	return walk(rel)
 }
 
-func (f *capturedFiles) inventory() []source {
+// takeInventory transfers the private read buffers after the final capture
+// checks. ReadFile returns only detached copies; callers must not retain direct
+// aliases of data. The reader is drained and frozen against subsequent reads.
+func (f *capturedFiles) takeInventory() []source {
+	f.frozen = true
 	result := make([]source, 0, len(f.data))
 	for path, data := range f.data {
 		roles := make([]string, 0, len(f.roles[path]))
@@ -379,7 +383,8 @@ func (f *capturedFiles) inventory() []source {
 		}
 
 		sort.Strings(roles)
-		result = append(result, source{path, roles, bytes.Clone(data), releasepolicy.SourceDigest(data)})
+		result = append(result, source{path, roles, data, releasepolicy.SourceDigest(data)})
+		delete(f.data, path)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Path < result[j].Path })
 	return result

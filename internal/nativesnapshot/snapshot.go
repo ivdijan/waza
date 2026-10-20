@@ -569,7 +569,7 @@ func captureArmRecorded(ctx context.Context, binding boundLocation, total *int, 
 			return result, nil, err
 		}
 	}
-	inventory := files.inventory()
+	inventory := files.takeInventory()
 	result.Sources = make([]sourceIdentity, 0, len(inventory))
 	for _, source := range inventory {
 		result.Sources = append(result.Sources, sourceIdentity{source.Path, source.Roles, len(source.Bytes), source.Digest})
