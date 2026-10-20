@@ -1,0 +1,101 @@
+name: Diagnostic controlledcomparison Linux profile
+
+# Disposable diagnostic branch only. Not a product/PR validation workflow.
+on:
+  push:
+    branches: [spboyer-virgil-profiling-linux-runtime]
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    if: github.ref == 'refs/heads/spboyer-virgil-profiling-linux-runtime'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      NO_COLOR: '1'
+      WAZA_NO_UPDATE_CHECK: '1'
+      ENABLE_COPILOT_TESTS: 'false'
+      ENABLE_COPILOT_SDK_TESTS: 'false'
+      ENABLE_LIVE_COPILOT_TESTS: 'false'
+      WAZA_DIAGNOSTIC_PROFILE_DIR: ${{ runner.temp }}/controlledcomparison-profile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+      - name: Prepare isolated evidence and rejecting runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$WAZA_DIAGNOSTIC_PROFILE_DIR"
+          guard="$RUNNER_TEMP/reject-copilot"
+          printf '#!/bin/sh\necho "diagnostic gate rejects real Copilot execution" >&2\nexit 125\n' > "$guard"
+          chmod 700 "$guard"
+          set +e
+          "$guard"
+          code=$?
+          set -e
+          test "$code" -eq 125
+          echo "COPILOT_CLI_PATH=$guard" >> "$GITHUB_ENV"
+          {
+            printf 'head='; git rev-parse HEAD
+            printf 'tree='; git rev-parse HEAD^{tree}
+            printf 'branch='; git branch --show-current
+            printf 'run_url=https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'runner=%s arch=%s image=%s version=%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$ImageOS" "$ImageVersion"
+            uname -a
+            go version
+            go env GOOS GOARCH GOAMD64 GOMAXPROCS
+            lscpu
+            git status --short
+            printf 'guard=%s verified_exit=125\n' "$guard"
+            printf 'package=./internal/controlledcomparison\n'
+            printf 'No selectors, short mode, fixture substitutions, or canonical test edits.\n'
+            printf 'CPU window: TestMain entry to min(completion,20m); sampled cumulative allocations at flush.\n'
+            printf 'Sampling and snapshot perturb execution; no performance/validation pass is inferred.\n'
+            printf 'WAZA_ASSURANCE_CLI and WAZA_FROZEN_RELEASE_READER are unset, matching ordinary CI.\n'
+            printf 'Frozen-reader optional sub-check is therefore not exercised; report existing skips from log.\n'
+            printf 'NO_COLOR=1 WAZA_NO_UPDATE_CHECK=1 ENABLE_COPILOT_TESTS=false ENABLE_COPILOT_SDK_TESTS=false ENABLE_LIVE_COPILOT_TESTS=false\n'
+          } > "$WAZA_DIAGNOSTIC_PROFILE_DIR/metadata.txt"
+      - name: Full package race and atomic coverage with profiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          command=(go test -tags=waza_diagnostic_profile -count=1 -race -covermode=atomic -timeout=30m -v
+            -coverprofile="$WAZA_DIAGNOSTIC_PROFILE_DIR/coverage.txt"
+            -o "$WAZA_DIAGNOSTIC_PROFILE_DIR/controlledcomparison.test"
+            ./internal/controlledcomparison)
+          printf '%q ' "${command[@]}" > "$WAZA_DIAGNOSTIC_PROFILE_DIR/command.txt"
+          printf '\n' >> "$WAZA_DIAGNOSTIC_PROFILE_DIR/command.txt"
+          date -u +%FT%TZ > "$WAZA_DIAGNOSTIC_PROFILE_DIR/command-start.txt"
+          set +e
+          "${command[@]}" 2>&1 | tee "$WAZA_DIAGNOSTIC_PROFILE_DIR/test.log"
+          code=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$code" > "$WAZA_DIAGNOSTIC_PROFILE_DIR/exit-code.txt"
+          date -u +%FT%TZ > "$WAZA_DIAGNOSTIC_PROFILE_DIR/command-end.txt"
+          exit "$code"
+      - name: Symbolize and seal diagnostic evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WAZA_DIAGNOSTIC_PROFILE_DIR"
+          go tool pprof -top -nodecount=40 ./controlledcomparison.test cpu.pprof > cpu-top.txt
+          go tool pprof -top -cum -nodecount=40 ./controlledcomparison.test cpu.pprof > cpu-cumulative.txt
+          go tool pprof -top -sample_index=alloc_space -nodecount=40 ./controlledcomparison.test allocs.pprof > allocations-top.txt
+          awk '/^=== RUN|^--- PASS|^--- FAIL|^--- SKIP|^[[:space:]]+--- SKIP/ { print }' test.log > test-status.txt
+          sha256sum ./* > SHA256SUMS
+      - name: Upload profiles, exact binary, and failure evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: controlledcomparison-linux-profile-${{ github.sha }}
+          path: ${{ runner.temp }}/controlledcomparison-profile
+          if-no-files-found: error
+          retention-days: 7
