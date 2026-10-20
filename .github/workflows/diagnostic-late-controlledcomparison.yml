@@ -1,0 +1,149 @@
+name: Diagnostic ab51 late Linux profile
+
+# Disposable diagnostic branch only; not a product gate or release workflow.
+on:
+  push:
+    branches: [spboyer-virgil-late-linux-profiling]
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    if: github.ref == 'refs/heads/spboyer-virgil-late-linux-profiling'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      NO_COLOR: '1'
+      WAZA_NO_UPDATE_CHECK: '1'
+      ENABLE_COPILOT_TESTS: 'false'
+      ENABLE_COPILOT_SDK_TESTS: 'false'
+      ENABLE_LIVE_COPILOT_TESTS: 'false'
+      ENABLE_LIVE_TESTS: 'false'
+      ENABLE_MODEL_TESTS: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: go.sum
+      - name: Verify exact source and isolate runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" -eq 1
+          test "$(git rev-parse HEAD^)" = ab51fd4d4ba634f9e1d8a807a120f79f55de122c
+          test "$(git rev-parse HEAD^:)" = 206237416a0104df06c023a25037b59163554dbf
+          diff -u <(printf '%s\n' .github/workflows/diagnostic-late-controlledcomparison.yml internal/controlledcomparison/diagnostic_late_profile_test.go) \
+            <(git diff --name-only HEAD^ HEAD)
+          test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+          test "$(go env GOVERSION)" = go1.26.9
+          dir="$RUNNER_TEMP/controlledcomparison-late-profile"
+          mkdir -m 700 "$dir"
+          echo "WAZA_DIAGNOSTIC_PROFILE_DIR=$dir" >> "$GITHUB_ENV"
+          guard="$dir/reject-copilot"
+          printf '#!/bin/sh\nprintf "diagnostic gate rejects real Copilot execution\\n" >&2\nexit 125\n' > "$guard"
+          chmod 700 "$guard"
+          set +e
+          "$guard" > "$dir/guard.stdout" 2> "$dir/guard.stderr"
+          code=$?
+          set -e
+          printf '%s\n' "$code" > "$dir/guard-exit.txt"
+          test "$code" -eq 125
+          echo "COPILOT_CLI_PATH=$guard" >> "$GITHUB_ENV"
+          # Preserve absolute Go caches while removing ambient HOME configuration.
+          echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_ENV"
+          echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+          mkdir -m 700 "$RUNNER_TEMP/diagnostic-home"
+          echo "HOME=$RUNNER_TEMP/diagnostic-home" >> "$GITHUB_ENV"
+          echo "XDG_CONFIG_HOME=$RUNNER_TEMP/diagnostic-home/config" >> "$GITHUB_ENV"
+          {
+            printf 'head='; git rev-parse HEAD
+            printf 'tree='; git rev-parse HEAD^{tree}
+            printf 'base='; git rev-parse HEAD^
+            printf 'base_tree='; git rev-parse HEAD^:
+            printf 'run_url=https://github.com/%s/actions/runs/%s\n' "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf 'run_attempt=%s job=%s\n' "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB"
+            printf 'runner=%s arch=%s image=%s version=%s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$ImageOS" "$ImageVersion"
+            uname -a
+            cat /etc/os-release
+            go version
+            go env GOOS GOARCH GOAMD64 GOTOOLCHAIN
+            lscpu
+            free -b
+            printf 'guard=%s verified_exit=125\n' "$guard"
+            sha256sum "$guard"
+            printf 'No selectors, deadline increases, source/fixture substitutions, or acceptance changes.\n'
+            printf 'CPU windows: entry to 20m, then after cumulative snapshot to 29m45s; exact boundaries/gaps in timeline.\n'
+            printf 'Final seconds remain unsampled. CPU sampling, snapshots, timeline sync and executable identity perturb execution.\n'
+            printf 'Default allocation sampling; no forced GC. alloc_space snapshots are cumulative, not RSS; do not sum them.\n'
+            printf 'WAZA_ASSURANCE_CLI, WAZA_FROZEN_RELEASE_READER and UPDATE_NATIVE_API_FIXTURES unset; existing skips retained.\n'
+            printf 'No product validation PASS is inferred from this diagnostic.\n'
+          } > "$dir/metadata.txt"
+          git status --short > "$dir/checkout-status.txt"
+      - name: One full package race atomic measurement
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset WAZA_ASSURANCE_CLI WAZA_FROZEN_RELEASE_READER UPDATE_NATIVE_API_FIXTURES
+          unset GH_TOKEN GITHUB_TOKEN COPILOT_GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
+          dir="$WAZA_DIAGNOSTIC_PROFILE_DIR"
+          env | grep -E '^(NO_COLOR|WAZA_NO_UPDATE_CHECK|ENABLE_.*TESTS|COPILOT_CLI_PATH|HOME|XDG_CONFIG_HOME)=' | sort > "$dir/offline-environment.txt"
+          command=(go test -tags=waza_diagnostic_late_profile -count=1 -race -covermode=atomic -timeout=30m -v -json
+            -coverprofile="$dir/coverage.txt" -o "$dir/controlledcomparison.test" ./internal/controlledcomparison)
+          printf '%q ' "${command[@]}" > "$dir/command.txt"
+          printf '\n' >> "$dir/command.txt"
+          date -u +%FT%T.%NZ > "$dir/command-start.txt"
+          set +e
+          "${command[@]}" 2> >(tee "$dir/test.stderr" >&2) | tee "$dir/test.jsonl"
+          codes=("${PIPESTATUS[@]}")
+          set -e
+          printf '%s\n' "${codes[0]}" > "$dir/exit-code.txt"
+          printf '%s\n' "${codes[1]}" > "$dir/tee-exit-code.txt"
+          date -u +%FT%T.%NZ > "$dir/command-end.txt"
+          test "${codes[1]}" -eq 0
+          exit "${codes[0]}"
+      - name: Symbolize profiles and seal evidence even on timeout
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/controlledcomparison-late-profile"
+          file controlledcomparison.test > binary-identity.txt
+          go version -m controlledcomparison.test >> binary-identity.txt
+          go tool buildid controlledcomparison.test >> binary-identity.txt
+          jq -rj 'select(.Action == "output") | .Output' test.jsonl > test.log
+          jq -r 'select(.Action == "run" or .Action == "pass" or .Action == "fail" or .Action == "skip") | [.Time,.Action,.Test // "<package>",.Elapsed // ""] | @tsv' test.jsonl > test-status.tsv
+          status=0
+          for profile in cpu-*.pprof allocs-*.pprof; do
+            if [[ ! -f "$profile" ]]; then
+              printf 'Missing profile glob: %s\n' "$profile" >&2
+              status=1
+              continue
+            fi
+            index=cpu
+            [[ "$profile" == allocs-* ]] && index=alloc_space
+            go tool pprof -top -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile" > "$profile.top.txt" 2> "$profile.top.stderr" || status=1
+            go tool pprof -top -cum -sample_index="$index" -nodecount=80 ./controlledcomparison.test "$profile" > "$profile.cum.txt" 2> "$profile.cum.stderr" || status=1
+          done
+          if [[ -f allocs-20m.pprof && -f allocs-29m45s.pprof ]]; then
+            go tool pprof -top -sample_index=alloc_space -base=allocs-20m.pprof -nodecount=80 ./controlledcomparison.test allocs-29m45s.pprof > allocs-late-delta.top.txt 2> allocs-late-delta.top.stderr || status=1
+            go tool pprof -top -cum -sample_index=alloc_space -base=allocs-20m.pprof -nodecount=80 ./controlledcomparison.test allocs-29m45s.pprof > allocs-late-delta.cum.txt 2> allocs-late-delta.cum.stderr || status=1
+          fi
+          printf '%s\n' "$status" > symbolization-exit.txt
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          exit "$status"
+      - name: Retain exact executable and diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ab51-late-linux-${{ github.sha }}
+          path: ${{ runner.temp }}/controlledcomparison-late-profile
+          if-no-files-found: error
+          retention-days: 7
