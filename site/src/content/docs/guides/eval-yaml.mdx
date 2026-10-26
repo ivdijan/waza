@@ -898,6 +898,10 @@ inputs:
 
 After each agent turn the responder either **replies** (the answer is sent back, continuing the conversation), **stops** (the agent is done), or **abstains** — which fails the run with a distinct `abstained` outcome, signalling the brief is too vague. If `max_followups` is reached while the agent is still asking questions, the loop stops with outcome `cap_exhausted` and graders evaluate the final state. Each task carries its own responder, so the same skill can be tested against several target configurations.
 
+Each successful decision tool ends the responder's classification turn without
+another model round. This does not discard conflicting calls that were already
+issued: multiple decisions in one classification still fail the run.
+
 ### Per-Turn Checkpoints
 
 By default graders only run once, against the final state of a multi-turn conversation. For long conversations you can run graders at specific turn boundaries using a top-level `checkpoints:` list:
