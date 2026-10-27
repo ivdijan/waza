@@ -35,9 +35,11 @@ type terminalControlExecutor struct {
 	Executor
 	nonterminal bool
 	callbacks   atomic.Int32
+	sessionIDs  []string
 }
 
 func (e *terminalControlExecutor) Execute(ctx context.Context, req *execution.ExecutionRequest) (*execution.ExecutionResponse, error) {
+	e.sessionIDs = append(e.sessionIDs, req.SessionID)
 	allowed := []string{"custom:" + toolRespond, "custom:" + toolStop, "custom:" + toolAbstain}
 	req.ToolPolicy = execution.NewToolPolicy(&allowed)
 	for i := range req.Tools {
@@ -82,8 +84,10 @@ func TestResponderTerminalRuntime(t *testing.T) {
 		{toolStop, `{}`, Decision{Kind: DecisionStop}},
 		{toolAbstain, `{"reason":"synthetic missing fact"}`, Decision{Kind: DecisionAbstain, Reason: "synthetic missing fact"}},
 	} {
-		for _, mode := range []string{"terminal", "nonterminal", "conflict"} {
+		for _, mode := range []string{"terminal", "nonterminal", "terminal_duplicate", "nonterminal_duplicate", "conflict"} {
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				nonterminal := mode == "nonterminal" || mode == "nonterminal_duplicate"
+				duplicateNextRound := mode == "terminal_duplicate" || mode == "nonterminal_duplicate"
 				conflictTool := toolStop
 				conflictArgs := `{}`
 				if tc.name == toolStop {
@@ -114,6 +118,13 @@ func TestResponderTerminalRuntime(t *testing.T) {
 							})
 						}
 						message["tool_calls"] = calls
+						finish = "tool_calls"
+					} else if count == 2 && duplicateNextRound {
+						message["content"] = nil
+						message["tool_calls"] = []any{map[string]any{
+							"id": "later-decision", "type": "function",
+							"function": map[string]any{"name": conflictTool, "arguments": conflictArgs},
+						}}
 						finish = "tool_calls"
 					}
 					err = json.NewEncoder(w).Encode(map[string]any{
@@ -155,7 +166,7 @@ func TestResponderTerminalRuntime(t *testing.T) {
 						return execution.NewOwnedCopilotClient(options)
 					},
 				}).Build()
-				ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 				defer cancel()
 				require.NoError(t, engine.Initialize(ctx))
 				defer func() {
@@ -163,26 +174,44 @@ func TestResponderTerminalRuntime(t *testing.T) {
 					defer cancel()
 					require.NoError(t, engine.Shutdown(cleanup))
 				}()
-				control := &terminalControlExecutor{Executor: engine, nonterminal: mode == "nonterminal"}
+				control := &terminalControlExecutor{Executor: engine, nonterminal: nonterminal}
 				classifier := New(control, models.ResponderConfig{Instructions: "Use the synthetic decision."}, "gpt-4.1")
-				decision, err := classifier.Classify(ctx, "Synthetic agent message.")
-				if mode == "conflict" {
-					require.ErrorContains(t, err, "responder tool call invalid: responder called ")
-					require.ErrorContains(t, err, "after a decision was already recorded")
-					require.Equal(t, Decision{}, decision)
-					require.EqualValues(t, 2, control.callbacks.Load(), "both already-issued calls must reach the real recorder")
-					t.Logf("same-response conflict: model requests=%d, decision callbacks=%d", requests.Load(), control.callbacks.Load())
-					return
+				var sessionID string
+				for turn, phase := range []string{"initial", "resumed"} {
+					requests.Store(0)
+					control.callbacks.Store(0)
+					decision, err := classifier.Classify(ctx, fmt.Sprintf("Synthetic agent message %d.", turn+1))
+					t.Logf("%s: model requests=%d, decision callbacks=%d, classification error=%t",
+						phase, requests.Load(), control.callbacks.Load(), err != nil)
+					require.NotEmpty(t, classifier.sessionID)
+					if turn == 0 {
+						require.Empty(t, control.sessionIDs[turn])
+						sessionID = classifier.sessionID
+					} else {
+						require.Equal(t, sessionID, control.sessionIDs[turn], "must exercise native session resumption")
+						require.Equal(t, sessionID, classifier.sessionID)
+					}
+
+					if mode == "conflict" || mode == "nonterminal_duplicate" {
+						require.ErrorContains(t, err, "responder tool call invalid: responder called ")
+						require.ErrorContains(t, err, "after a decision was already recorded")
+						require.Equal(t, Decision{}, decision)
+						require.EqualValues(t, 2, control.callbacks.Load(), "both conflicting calls must reach the real recorder")
+						if mode == "nonterminal_duplicate" {
+							require.EqualValues(t, 3, requests.Load(), "ordinary tools allow the later decision and final recovery generation")
+						}
+					} else {
+						require.NoError(t, err)
+						require.Equal(t, tc.want, decision)
+						require.EqualValues(t, 1, control.callbacks.Load())
+						wantRequests := int32(1)
+						if nonterminal {
+							wantRequests = 2
+						}
+						require.Equal(t, wantRequests, requests.Load(), "successful terminal decision must prevent the next model request")
+					}
 				}
-				require.NoError(t, err)
-				require.Equal(t, tc.want, decision)
-				require.EqualValues(t, 1, control.callbacks.Load())
-				wantRequests := int32(1)
-				if mode == "nonterminal" {
-					wantRequests = 2
-				}
-				require.Equal(t, wantRequests, requests.Load(), "successful terminal decision must prevent the next model request")
-				t.Logf("model requests=%d, decision callbacks=%d", requests.Load(), control.callbacks.Load())
+				require.Len(t, control.sessionIDs, 2)
 			})
 		}
 	}
