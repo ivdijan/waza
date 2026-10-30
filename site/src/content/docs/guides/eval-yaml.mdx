@@ -1018,7 +1018,9 @@ error and responder reason. A successful response that contains only text still
 reports `responder did not call a decision tool`. That message also remains the
 fallback when no decision and no execution error detail are available. This
 distinction improves diagnosis; it does not repair provider failures or change
-grading.
+grading. Execution responses snapshot collected diagnostic output safely alongside
+SDK event delivery; this does not wait for future events or change final usage
+collection.
 
 :::caution[Duplicate decision errors]
 An error such as `responder called responder_stop after a decision was already recorded`
