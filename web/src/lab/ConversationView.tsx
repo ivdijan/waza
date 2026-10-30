@@ -2,7 +2,10 @@ import type { TaskResult } from "../api/client";
 
 export default function ConversationView({ task }: { task?: TaskResult }) {
   const messages = (task?.transcript ?? []).filter(
-    (event) => event.type === "user.message" || event.type === "assistant.message",
+    (event) =>
+      (event.type === "user.message" || event.type === "assistant.message") &&
+      typeof event.content === "string" &&
+      event.content.trim().length > 0,
   );
 
   if (!messages.length) {
@@ -40,11 +43,7 @@ export default function ConversationView({ task }: { task?: TaskResult }) {
               </strong>
               <span>Message {index + 1}</span>
             </div>
-            {typeof event.content !== "string" || event.content === "" ? (
-              <p className="lab-note">No message text recorded.</p>
-            ) : (
-              <div className="lab-message-content">{event.content}</div>
-            )}
+            <div className="lab-message-content">{event.content}</div>
           </li>
         ))}
       </ol>
