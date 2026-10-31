@@ -64,7 +64,7 @@ test.describe("Lab conversation", () => {
       )).toBeVisible();
       await expect(messages.nth(index).locator(".lab-message-heading span")).toHaveText(`Message ${index + 1}`);
     }
-    await expect(dialog).toContainText("7 recorded messages.");
+    await expect(dialog).toContainText("7 messages with recorded text.");
     await expect(dialog).not.toContainText("No message text recorded.");
     await expect(dialog).toContainText("Responder recorded 2 simulated-user follow-ups.");
     await expect(dialog).toContainText("Individual user messages do not record human or simulated provenance.");
@@ -97,7 +97,7 @@ test.describe("Lab conversation", () => {
     const task = dialog.getByRole("combobox", { name: "Task", exact: true });
     for (const id of ["absent", "empty", "tools"]) {
       await task.selectOption(`id:${id}`);
-      await expect(dialog).toContainText("No recorded conversation messages for this task.");
+      await expect(dialog).toContainText("No recorded conversation text for this task.");
       await expect(dialog.getByRole("list", { name: "Recorded conversation" })).toHaveCount(0);
       await expect(dialog).not.toContainText("PROMPT_IS_NOT_A_TRANSCRIPT");
     }
@@ -120,10 +120,29 @@ test.describe("Lab conversation", () => {
     });
     for (const id of ["empty-messages", "textless"]) {
       await dialog.getByRole("combobox", { name: "Task", exact: true }).selectOption(`id:${id}`);
-      await expect(dialog).toContainText("No recorded conversation messages for this task.");
+      await expect(dialog).toContainText("No recorded conversation text for this task.");
       await expect(dialog.getByRole("list", { name: "Recorded conversation" })).toHaveCount(0);
       await expect(dialog).not.toContainText("No message text recorded.");
       await expect(dialog).not.toContainText("Responder recorded");
+    }
+  });
+
+  test("preserves independent responder counts without recorded message text", async ({ page }) => {
+    const dialog = await openConversation(page, {
+      ...CONVERSATION_DETAIL,
+      tasks: [0, 1, 2].map((followupsSent) => ({
+        ...CONVERSATION_DETAIL.tasks[0]!, id: `responder-${followupsSent}`,
+        transcript: textlessMessages,
+        responder: { followupsSent, outcome: "stopped" },
+      })),
+    });
+    for (const count of [0, 1, 2]) {
+      await dialog.getByRole("combobox", { name: "Task", exact: true }).selectOption(`id:responder-${count}`);
+      await expect(dialog).toContainText("No recorded conversation text for this task.");
+      await expect(dialog).toContainText("Use Trajectory for underlying events.");
+      await expect(dialog.getByRole("list", { name: "Recorded conversation" })).toHaveCount(0);
+      await expect(dialog).toContainText(`Responder recorded ${count} simulated-user ${count === 1 ? "follow-up" : "follow-ups"}.`);
+      await expect(dialog).toContainText("Individual user messages do not record human or simulated provenance.");
     }
   });
 
@@ -149,7 +168,7 @@ test.describe("Lab conversation", () => {
     await expect(messages).toHaveCount(1);
     await expect(messages.locator(".lab-message-content")).toHaveText("0");
     await expect(messages.locator(".lab-message-heading span")).toHaveText("Message 1");
-    await expect(dialog).toContainText("1 recorded message.");
+    await expect(dialog).toContainText("1 message with recorded text.");
     await expect(dialog).not.toContainText("No message text recorded.");
   });
 
